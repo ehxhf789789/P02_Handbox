@@ -1,0 +1,111 @@
+{
+  "name": "AWS 서비스 연결 테스트",
+  "description": "모든 AWS 서비스 연결 상태를 확인하는 테스트 워크플로우 (토큰 소비 없음)",
+  "nodes": [
+    {
+      "id": "test-input",
+      "type": "input",
+      "position": { "x": 100, "y": 300 },
+      "data": {
+        "label": "테스트 입력",
+        "color": "#22c55e",
+        "description": "연결 테스트용",
+        "useCase": "테스트 텍스트",
+        "config": {
+          "inputType": "text",
+          "text_input": "AWS 연결 테스트"
+        }
+      }
+    },
+    {
+      "id": "test-translate",
+      "type": "aws-translate",
+      "position": { "x": 400, "y": 100 },
+      "data": {
+        "label": "Translate 테스트",
+        "color": "#f59e0b",
+        "description": "번역 API 연결",
+        "useCase": "한국어 → 영어",
+        "config": {
+          "source_lang": "ko",
+          "target_lang": "en"
+        }
+      }
+    },
+    {
+      "id": "test-comprehend",
+      "type": "aws-comprehend",
+      "position": { "x": 400, "y": 250 },
+      "data": {
+        "label": "Comprehend 테스트",
+        "color": "#8b5cf6",
+        "description": "감정 분석 API 연결",
+        "useCase": "감정 분석",
+        "config": {
+          "languageCode": "ko"
+        }
+      }
+    },
+    {
+      "id": "test-s3",
+      "type": "aws-s3",
+      "position": { "x": 400, "y": 400 },
+      "data": {
+        "label": "S3 테스트",
+        "color": "#06b6d4",
+        "description": "S3 버킷 연결",
+        "useCase": "스토리지 확인",
+        "config": {
+          "operation": "list"
+        }
+      }
+    },
+    {
+      "id": "test-textract",
+      "type": "aws-textract",
+      "position": { "x": 400, "y": 550 },
+      "data": {
+        "label": "Textract 테스트",
+        "color": "#ec4899",
+        "description": "OCR API 연결",
+        "useCase": "문서 분석",
+        "config": {}
+      }
+    },
+    {
+      "id": "test-merge",
+      "type": "merge",
+      "position": { "x": 700, "y": 300 },
+      "data": {
+        "label": "결과 병합",
+        "color": "#6366f1",
+        "description": "모든 테스트 결과 병합",
+        "useCase": "연결 상태 종합",
+        "config": {}
+      }
+    },
+    {
+      "id": "test-output",
+      "type": "output",
+      "position": { "x": 950, "y": 300 },
+      "data": {
+        "label": "연결 상태 결과",
+        "color": "#ef4444",
+        "description": "테스트 결과 출력",
+        "useCase": "연결 상태 확인",
+        "config": {}
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e-input-translate", "source": "test-input", "target": "test-translate" },
+    { "id": "e-input-comprehend", "source": "test-input", "target": "test-comprehend" },
+    { "id": "e-input-s3", "source": "test-input", "target": "test-s3" },
+    { "id": "e-input-textract", "source": "test-input", "target": "test-textract" },
+    { "id": "e-translate-merge", "source": "test-translate", "target": "test-merge" },
+    { "id": "e-comprehend-merge", "source": "test-comprehend", "target": "test-merge" },
+    { "id": "e-s3-merge", "source": "test-s3", "target": "test-merge" },
+    { "id": "e-textract-merge", "source": "test-textract", "target": "test-merge" },
+    { "id": "e-merge-output", "source": "test-merge", "target": "test-output" }
+  ]
+}

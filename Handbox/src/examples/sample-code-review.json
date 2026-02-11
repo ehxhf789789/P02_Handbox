@@ -1,0 +1,174 @@
+{
+  "name": "AI 코드 리뷰",
+  "description": "코드를 분석하여 버그, 보안 이슈, 개선점을 찾아내는 워크플로우",
+  "nodes": [
+    {
+      "id": "node_input",
+      "type": "input",
+      "position": { "x": 50, "y": 200 },
+      "data": {
+        "label": "코드 입력",
+        "color": "#22c55e",
+        "description": "리뷰할 코드",
+        "config": {
+          "inputType": "text",
+          "placeholder": "리뷰할 코드를 붙여넣으세요..."
+        }
+      }
+    },
+    {
+      "id": "node_bug_prompt",
+      "type": "prompt-template",
+      "position": { "x": 300, "y": 50 },
+      "data": {
+        "label": "버그 분석",
+        "color": "#ef4444",
+        "description": "잠재적 버그 검출",
+        "config": {
+          "template": "다음 코드에서 잠재적인 버그나 오류를 찾아주세요:\n\n```\n{{input}}\n```\n\n분석 항목:\n1. 논리적 오류\n2. 엣지 케이스 누락\n3. 널 포인터 가능성\n4. 무한 루프 위험\n5. 타입 관련 이슈"
+        }
+      }
+    },
+    {
+      "id": "node_security_prompt",
+      "type": "prompt-template",
+      "position": { "x": 300, "y": 200 },
+      "data": {
+        "label": "보안 분석",
+        "color": "#f59e0b",
+        "description": "보안 취약점 검출",
+        "config": {
+          "template": "다음 코드의 보안 취약점을 분석해주세요:\n\n```\n{{input}}\n```\n\n분석 항목:\n1. SQL Injection\n2. XSS 취약점\n3. 인증/인가 문제\n4. 데이터 노출 위험\n5. 입력 검증 부족\n6. 암호화 관련 이슈"
+        }
+      }
+    },
+    {
+      "id": "node_quality_prompt",
+      "type": "prompt-template",
+      "position": { "x": 300, "y": 350 },
+      "data": {
+        "label": "품질 분석",
+        "color": "#3b82f6",
+        "description": "코드 품질 개선",
+        "config": {
+          "template": "다음 코드의 품질과 가독성을 분석하고 개선점을 제안해주세요:\n\n```\n{{input}}\n```\n\n분석 항목:\n1. 네이밍 컨벤션\n2. 코드 중복\n3. 함수 분리 필요성\n4. 주석 필요 여부\n5. 성능 최적화 가능성\n6. 테스트 용이성"
+        }
+      }
+    },
+    {
+      "id": "node_bug_reviewer",
+      "type": "model-claude-3-5-sonnet",
+      "position": { "x": 550, "y": 50 },
+      "data": {
+        "label": "버그 헌터",
+        "color": "#6366f1",
+        "description": "버그 분석가",
+        "provider": "Anthropic",
+        "config": {
+          "system_prompt": "당신은 시니어 개발자이자 버그 헌터입니다. 코드의 잠재적 문제점을 정확히 찾아냅니다.",
+          "temperature": 0.2,
+          "max_tokens": 2048
+        }
+      }
+    },
+    {
+      "id": "node_security_reviewer",
+      "type": "model-claude-3-5-sonnet",
+      "position": { "x": 550, "y": 200 },
+      "data": {
+        "label": "보안 전문가",
+        "color": "#6366f1",
+        "description": "보안 분석가",
+        "provider": "Anthropic",
+        "config": {
+          "system_prompt": "당신은 보안 전문가입니다. OWASP Top 10을 포함한 다양한 보안 취약점을 식별합니다.",
+          "temperature": 0.2,
+          "max_tokens": 2048
+        }
+      }
+    },
+    {
+      "id": "node_quality_reviewer",
+      "type": "model-claude-3-5-sonnet",
+      "position": { "x": 550, "y": 350 },
+      "data": {
+        "label": "코드 아키텍트",
+        "color": "#6366f1",
+        "description": "품질 전문가",
+        "provider": "Anthropic",
+        "config": {
+          "system_prompt": "당신은 소프트웨어 아키텍트입니다. 클린 코드, SOLID 원칙, 디자인 패턴에 대한 깊은 이해를 가지고 있습니다.",
+          "temperature": 0.3,
+          "max_tokens": 2048
+        }
+      }
+    },
+    {
+      "id": "node_merge",
+      "type": "merge",
+      "position": { "x": 800, "y": 200 },
+      "data": {
+        "label": "리뷰 통합",
+        "color": "#8b5cf6",
+        "description": "결과 병합",
+        "config": {}
+      }
+    },
+    {
+      "id": "node_final_prompt",
+      "type": "prompt-template",
+      "position": { "x": 1000, "y": 200 },
+      "data": {
+        "label": "최종 리포트",
+        "color": "#06b6d4",
+        "description": "종합 정리",
+        "config": {
+          "template": "다음 코드 리뷰 결과를 종합하여 우선순위가 높은 순서로 정리해주세요:\n\n{{input}}\n\n## 코드 리뷰 리포트\n\n### Critical (즉시 수정 필요)\n\n### High (빠른 수정 권장)\n\n### Medium (개선 권장)\n\n### Low (참고 사항)\n\n### 총평"
+        }
+      }
+    },
+    {
+      "id": "node_final_reviewer",
+      "type": "model-claude-3-5-sonnet",
+      "position": { "x": 1200, "y": 200 },
+      "data": {
+        "label": "리드 리뷰어",
+        "color": "#6366f1",
+        "description": "최종 검토",
+        "provider": "Anthropic",
+        "config": {
+          "system_prompt": "당신은 기술 리드입니다. 여러 리뷰어의 피드백을 종합하여 실행 가능한 액션 아이템으로 정리합니다.",
+          "temperature": 0.3,
+          "max_tokens": 2048
+        }
+      }
+    },
+    {
+      "id": "node_output",
+      "type": "output",
+      "position": { "x": 1400, "y": 200 },
+      "data": {
+        "label": "리뷰 결과",
+        "color": "#ef4444",
+        "description": "코드 리뷰 리포트",
+        "config": {
+          "outputFormat": "markdown"
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "node_input", "target": "node_bug_prompt", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e2", "source": "node_input", "target": "node_security_prompt", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e3", "source": "node_input", "target": "node_quality_prompt", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e4", "source": "node_bug_prompt", "target": "node_bug_reviewer", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e5", "source": "node_security_prompt", "target": "node_security_reviewer", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e6", "source": "node_quality_prompt", "target": "node_quality_reviewer", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e7", "source": "node_bug_reviewer", "target": "node_merge", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e8", "source": "node_security_reviewer", "target": "node_merge", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e9", "source": "node_quality_reviewer", "target": "node_merge", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e10", "source": "node_merge", "target": "node_final_prompt", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e11", "source": "node_final_prompt", "target": "node_final_reviewer", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e12", "source": "node_final_reviewer", "target": "node_output", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } }
+  ]
+}

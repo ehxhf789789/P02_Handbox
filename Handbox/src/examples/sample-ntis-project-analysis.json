@@ -1,0 +1,71 @@
+{
+  "name": "NTIS 국가R&D 분석",
+  "description": "국가연구개발사업 데이터 검색 및 분석",
+  "nodes": [
+    {
+      "id": "node_ntis",
+      "type": "api-ntis",
+      "position": { "x": 50, "y": 150 },
+      "data": {
+        "label": "NTIS R&D검색",
+        "color": "#3b82f6",
+        "description": "국가R&D 사업 검색",
+        "config": {
+          "api_key": "",
+          "search_type": "project",
+          "keyword": "건설 자동화",
+          "start_year": "2020",
+          "end_year": "2024",
+          "page": 1,
+          "per_page": 20
+        }
+      }
+    },
+    {
+      "id": "node_prompt",
+      "type": "prompt-template",
+      "position": { "x": 300, "y": 150 },
+      "data": {
+        "label": "분석 프롬프트",
+        "color": "#06b6d4",
+        "description": "R&D 트렌드 분석",
+        "config": {
+          "template": "다음 국가R&D 사업 목록을 분석해주세요:\n\n{{input}}\n\n분석 요청:\n1. 연도별 연구 트렌드\n2. 주요 연구 기관 현황\n3. 예산 규모별 분포\n4. 핵심 연구 주제 도출\n5. 향후 연구 방향 제언"
+        }
+      }
+    },
+    {
+      "id": "node_model",
+      "type": "model-claude-3-5-sonnet",
+      "position": { "x": 550, "y": 150 },
+      "data": {
+        "label": "AI 분석",
+        "color": "#6366f1",
+        "description": "R&D 동향 분석",
+        "config": {
+          "system_prompt": "당신은 국가연구개발사업 분석 전문가입니다. R&D 투자 현황과 연구 트렌드를 분석합니다.",
+          "temperature": 0.4,
+          "max_tokens": 4096
+        }
+      }
+    },
+    {
+      "id": "node_output",
+      "type": "output",
+      "position": { "x": 800, "y": 150 },
+      "data": {
+        "label": "R&D 분석 결과",
+        "color": "#ef4444",
+        "description": "R&D 트렌드 리포트",
+        "config": {
+          "output_format": "markdown"
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "node_ntis", "target": "node_prompt", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e2", "source": "node_prompt", "target": "node_model", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e3", "source": "node_model", "target": "node_output", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } }
+  ]
+}

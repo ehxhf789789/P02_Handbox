@@ -1,0 +1,127 @@
+{
+  "name": "FAQ 자동 응답 시스템",
+  "description": "자주 묻는 질문에 대해 지식 베이스를 활용하여 정확한 답변을 제공하는 워크플로우",
+  "nodes": [
+    {
+      "id": "node_input",
+      "type": "input",
+      "position": { "x": 50, "y": 200 },
+      "data": {
+        "label": "사용자 질문",
+        "color": "#22c55e",
+        "description": "질문 입력",
+        "config": {
+          "inputType": "text",
+          "placeholder": "질문을 입력하세요..."
+        }
+      }
+    },
+    {
+      "id": "node_classify_prompt",
+      "type": "prompt-template",
+      "position": { "x": 250, "y": 100 },
+      "data": {
+        "label": "질문 분류",
+        "color": "#06b6d4",
+        "description": "카테고리 분류",
+        "config": {
+          "template": "다음 질문을 분류하고 핵심 키워드를 추출해주세요:\n\n질문: {{input}}\n\n1. 카테고리: (제품, 서비스, 기술지원, 결제, 배송, 반품, 기타)\n2. 핵심 키워드: (쉼표로 구분)\n3. 질문 의도: (정보 요청, 문제 해결, 절차 안내, 불만 제기)\n4. 긴급도: (높음, 보통, 낮음)\n\nJSON 형식으로 출력해주세요."
+        }
+      }
+    },
+    {
+      "id": "node_classifier",
+      "type": "model-claude-3-haiku",
+      "position": { "x": 450, "y": 100 },
+      "data": {
+        "label": "질문 분류기",
+        "color": "#a855f7",
+        "description": "의도 파악",
+        "provider": "Anthropic",
+        "config": {
+          "system_prompt": "당신은 고객 서비스 질문 분류 전문가입니다. 질문의 의도와 카테고리를 정확하게 파악합니다.",
+          "temperature": 0.1,
+          "max_tokens": 512
+        }
+      }
+    },
+    {
+      "id": "node_kb_search",
+      "type": "bedrock-knowledge-base",
+      "position": { "x": 250, "y": 300 },
+      "data": {
+        "label": "FAQ 검색",
+        "color": "#3b82f6",
+        "description": "지식 베이스",
+        "config": {
+          "knowledge_base_id": "YOUR_KB_ID",
+          "top_k": 5,
+          "min_score": 0.7
+        }
+      }
+    },
+    {
+      "id": "node_answer_prompt",
+      "type": "prompt-template",
+      "position": { "x": 650, "y": 200 },
+      "data": {
+        "label": "답변 생성",
+        "color": "#06b6d4",
+        "description": "응답 작성",
+        "config": {
+          "template": "다음 정보를 바탕으로 고객 질문에 친절하고 정확하게 답변해주세요.\n\n질문 분석:\n{{classification}}\n\n관련 FAQ:\n{{faq_results}}\n\n원본 질문: {{original_question}}\n\n답변 작성 가이드라인:\n1. 친절하고 전문적인 어조 유지\n2. 핵심 답변을 먼저 제공\n3. 필요시 추가 정보나 링크 안내\n4. 해결되지 않을 경우 상담원 연결 안내"
+        }
+      }
+    },
+    {
+      "id": "node_responder",
+      "type": "model-claude-3-5-sonnet",
+      "position": { "x": 850, "y": 200 },
+      "data": {
+        "label": "응답 생성기",
+        "color": "#6366f1",
+        "description": "답변 작성",
+        "provider": "Anthropic",
+        "config": {
+          "system_prompt": "당신은 친절하고 전문적인 고객 서비스 담당자입니다. FAQ와 지식 베이스를 활용하여 정확한 정보를 제공하며, 고객의 문제를 해결하는 데 집중합니다. 확실하지 않은 정보는 추측하지 않고 상담원 연결을 안내합니다.",
+          "temperature": 0.4,
+          "max_tokens": 1024
+        }
+      }
+    },
+    {
+      "id": "node_merge",
+      "type": "merge",
+      "position": { "x": 650, "y": 100 },
+      "data": {
+        "label": "정보 통합",
+        "color": "#8b5cf6",
+        "description": "분류+검색 결과",
+        "config": {}
+      }
+    },
+    {
+      "id": "node_output",
+      "type": "output",
+      "position": { "x": 1050, "y": 200 },
+      "data": {
+        "label": "답변 결과",
+        "color": "#ef4444",
+        "description": "고객 응답",
+        "config": {
+          "outputFormat": "text"
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "node_input", "target": "node_classify_prompt", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e2", "source": "node_input", "target": "node_kb_search", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e3", "source": "node_classify_prompt", "target": "node_classifier", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e4", "source": "node_classifier", "target": "node_merge", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e5", "source": "node_kb_search", "target": "node_merge", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e6", "source": "node_merge", "target": "node_answer_prompt", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e7", "source": "node_answer_prompt", "target": "node_responder", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e8", "source": "node_responder", "target": "node_output", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } }
+  ]
+}

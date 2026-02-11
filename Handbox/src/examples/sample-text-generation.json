@@ -1,0 +1,88 @@
+{
+  "name": "텍스트 생성 (Claude)",
+  "description": "Claude 3.5 Sonnet을 사용하여 텍스트를 생성하는 간단한 워크플로우",
+  "nodes": [
+    {
+      "id": "node_input",
+      "type": "input",
+      "position": { "x": 50, "y": 150 },
+      "data": {
+        "label": "입력",
+        "color": "#22c55e",
+        "description": "시작",
+        "useCase": "프롬프트 입력",
+        "config": {
+          "inputType": "text",
+          "placeholder": "생성할 내용을 입력하세요..."
+        }
+      }
+    },
+    {
+      "id": "node_prompt",
+      "type": "prompt-template",
+      "position": { "x": 300, "y": 150 },
+      "data": {
+        "label": "프롬프트",
+        "color": "#06b6d4",
+        "description": "템플릿",
+        "useCase": "시스템 프롬프트 구성",
+        "config": {
+          "template": "당신은 전문 작가입니다. 다음 요청에 대해 창의적이고 상세한 답변을 작성하세요.\n\n요청: {{input}}\n\n답변:"
+        }
+      }
+    },
+    {
+      "id": "node_claude",
+      "type": "model-claude-3-5-sonnet",
+      "position": { "x": 550, "y": 150 },
+      "data": {
+        "label": "Claude 3.5 Sonnet",
+        "color": "#6366f1",
+        "description": "최신 고성능 모델",
+        "provider": "Anthropic",
+        "useCase": "텍스트 생성",
+        "config": {
+          "modelId": "anthropic.claude-3-5-sonnet-20240620-v1:0",
+          "maxTokens": 2048,
+          "temperature": 0.7,
+          "topP": 0.9
+        }
+      }
+    },
+    {
+      "id": "node_output",
+      "type": "output",
+      "position": { "x": 800, "y": 150 },
+      "data": {
+        "label": "출력",
+        "color": "#ef4444",
+        "description": "종료",
+        "useCase": "생성된 텍스트 반환",
+        "config": {}
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "node_input",
+      "target": "node_prompt",
+      "animated": true,
+      "style": { "stroke": "#6366f1", "strokeWidth": 2 }
+    },
+    {
+      "id": "e2",
+      "source": "node_prompt",
+      "target": "node_claude",
+      "animated": true,
+      "style": { "stroke": "#6366f1", "strokeWidth": 2 }
+    },
+    {
+      "id": "e3",
+      "source": "node_claude",
+      "target": "node_output",
+      "animated": true,
+      "style": { "stroke": "#6366f1", "strokeWidth": 2 }
+    }
+  ]
+}

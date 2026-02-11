@@ -1,0 +1,114 @@
+{
+  "name": "데이터 추출 및 정리",
+  "description": "비정형 데이터에서 구조화된 정보를 추출하고 정리하는 워크플로우",
+  "nodes": [
+    {
+      "id": "node_input",
+      "type": "input",
+      "position": { "x": 50, "y": 150 },
+      "data": {
+        "label": "원본 데이터",
+        "color": "#22c55e",
+        "description": "비정형 텍스트",
+        "config": {
+          "inputType": "text",
+          "placeholder": "정리할 데이터를 입력하세요 (이메일, 계약서, 이력서 등)..."
+        }
+      }
+    },
+    {
+      "id": "node_comprehend",
+      "type": "aws-comprehend",
+      "position": { "x": 250, "y": 50 },
+      "data": {
+        "label": "엔티티 추출",
+        "color": "#ff9900",
+        "description": "NLP 분석",
+        "config": {
+          "languageCode": "ko",
+          "features": ["ENTITIES", "KEY_PHRASES", "PII_ENTITIES"]
+        }
+      }
+    },
+    {
+      "id": "node_extract_prompt",
+      "type": "prompt-template",
+      "position": { "x": 250, "y": 200 },
+      "data": {
+        "label": "정보 추출",
+        "color": "#06b6d4",
+        "description": "구조화 요청",
+        "config": {
+          "template": "다음 텍스트에서 정보를 추출하여 구조화된 JSON 형식으로 변환해주세요:\n\n원본 텍스트:\n{{input}}\n\n추출할 정보:\n1. 인물 정보 (이름, 연락처, 이메일, 직위 등)\n2. 조직 정보 (회사명, 부서, 주소 등)\n3. 날짜/기간 정보\n4. 금액/수량 정보\n5. 주요 키워드\n6. 핵심 내용 요약\n\nJSON 형식으로 출력해주세요."
+        }
+      }
+    },
+    {
+      "id": "node_extractor",
+      "type": "model-claude-3-5-sonnet",
+      "position": { "x": 500, "y": 150 },
+      "data": {
+        "label": "데이터 추출기",
+        "color": "#6366f1",
+        "description": "정보 구조화",
+        "provider": "Anthropic",
+        "config": {
+          "system_prompt": "당신은 데이터 추출 전문가입니다. 비정형 텍스트에서 정보를 정확하게 추출하여 구조화된 형식으로 변환합니다. 추출할 수 없는 정보는 null로 표시합니다.",
+          "temperature": 0.1,
+          "max_tokens": 2048
+        }
+      }
+    },
+    {
+      "id": "node_validate_prompt",
+      "type": "prompt-template",
+      "position": { "x": 750, "y": 150 },
+      "data": {
+        "label": "검증 및 보완",
+        "color": "#06b6d4",
+        "description": "데이터 정제",
+        "config": {
+          "template": "추출된 데이터를 검증하고 보완해주세요:\n\n{{input}}\n\n검증 사항:\n1. 필수 정보 누락 여부\n2. 형식 일관성 (날짜, 전화번호 등)\n3. 논리적 오류\n4. 중복 데이터\n\n검증 후 정제된 최종 데이터를 JSON 형식으로 출력해주세요."
+        }
+      }
+    },
+    {
+      "id": "node_validator",
+      "type": "model-claude-3-haiku",
+      "position": { "x": 950, "y": 150 },
+      "data": {
+        "label": "검증기",
+        "color": "#a855f7",
+        "description": "데이터 정제",
+        "provider": "Anthropic",
+        "config": {
+          "system_prompt": "당신은 데이터 품질 전문가입니다. 추출된 데이터의 정확성과 일관성을 검증합니다.",
+          "temperature": 0.1,
+          "max_tokens": 2048
+        }
+      }
+    },
+    {
+      "id": "node_output",
+      "type": "output",
+      "position": { "x": 1150, "y": 150 },
+      "data": {
+        "label": "구조화된 데이터",
+        "color": "#ef4444",
+        "description": "JSON 결과",
+        "config": {
+          "outputFormat": "json"
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "node_input", "target": "node_comprehend", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e2", "source": "node_input", "target": "node_extract_prompt", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e3", "source": "node_comprehend", "target": "node_extractor", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e4", "source": "node_extract_prompt", "target": "node_extractor", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e5", "source": "node_extractor", "target": "node_validate_prompt", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e6", "source": "node_validate_prompt", "target": "node_validator", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e7", "source": "node_validator", "target": "node_output", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } }
+  ]
+}

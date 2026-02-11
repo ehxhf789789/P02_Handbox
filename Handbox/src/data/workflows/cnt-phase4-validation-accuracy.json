@@ -1,0 +1,104 @@
+﻿{
+  "id": "cnt-phase4-validation-accuracy",
+  "name": "[Phase 4] 정확도 검증",
+  "description": "실제 심사 결과와 AI 판정 비교 → 정확도/재현율/F1 스코어 산출",
+  "category": "CNT 평가 연구",
+  "nodes": [
+    {
+      "id": "node_1",
+      "type": "local-file",
+      "position": { "x": 0, "y": 100 },
+      "data": {
+        "label": "AI 판정 결과",
+        "color": "#6366f1",
+        "description": "위원회 시뮬레이션 결과",
+        "config": { "file_filter": "*.json" }
+      }
+    },
+    {
+      "id": "node_2",
+      "type": "local-file",
+      "position": { "x": 0, "y": 200 },
+      "data": {
+        "label": "실제 심사 결과",
+        "color": "#ef4444",
+        "description": "건설신기술 지정 여부",
+        "config": { "file_filter": "*.xlsx;*.csv" }
+      }
+    },
+    {
+      "id": "node_3",
+      "type": "merge",
+      "position": { "x": 200, "y": 150 },
+      "data": {
+        "label": "결과 병합",
+        "color": "#8b5cf6",
+        "description": "AI vs 실제 결과 매칭",
+        "config": {}
+      }
+    },
+    {
+      "id": "node_4",
+      "type": "custom-agent",
+      "position": { "x": 400, "y": 150 },
+      "data": {
+        "label": "정확도 분석",
+        "color": "#f97316",
+        "description": "Confusion Matrix 계산",
+        "config": {
+          "agent_type": "accuracy_analyzer",
+          "system_prompt": "AI 판정 결과와 실제 심사 결과를 비교하여 정확도를 분석합니다.\n\n## 분석 지표\n1. Accuracy (정확도): (TP + TN) / Total\n2. Precision (정밀도): TP / (TP + FP)\n3. Recall (재현율): TP / (TP + FN)\n4. F1 Score: 2 * (Precision * Recall) / (Precision + Recall)\n\n## Confusion Matrix\n- TP: AI 통과 & 실제 지정\n- TN: AI 불통과 & 실제 미지정\n- FP: AI 통과 & 실제 미지정 (과대평가)\n- FN: AI 불통과 & 실제 지정 (과소평가)\n\n## 출력 형식\n{\n  \"confusion_matrix\": {\n    \"true_positive\": 0,\n    \"true_negative\": 0,\n    \"false_positive\": 0,\n    \"false_negative\": 0\n  },\n  \"metrics\": {\n    \"accuracy\": 0.00,\n    \"precision\": 0.00,\n    \"recall\": 0.00,\n    \"f1_score\": 0.00\n  },\n  \"analysis\": {\n    \"overestimated_cases\": [...],\n    \"underestimated_cases\": [...],\n    \"recommendation\": \"...\"\n  }\n}"
+        }
+      }
+    },
+    {
+      "id": "node_5",
+      "type": "custom-agent",
+      "position": { "x": 600, "y": 50 },
+      "data": {
+        "label": "오류 분석",
+        "color": "#ec4899",
+        "description": "오판 원인 분석",
+        "config": {
+          "agent_type": "error_analyzer",
+          "system_prompt": "AI 판정과 실제 결과가 불일치한 케이스를 분석합니다.\n\n## 분석 항목\n1. False Positive 원인 분석\n   - 신규성 과대평가 여부\n   - 진보성 과대평가 여부\n   - 현장적용성/경제성 과대평가 여부\n\n2. False Negative 원인 분석\n   - 혁신적 기술의 과소평가\n   - 전문 용어 이해 부족\n   - 맥락 파악 실패\n\n## 개선 방안 제안\n- 프롬프트 수정 필요 사항\n- 지식베이스 보완 사항\n- 평가 기준 조정 제안"
+        }
+      }
+    },
+    {
+      "id": "node_6",
+      "type": "viz-json-viewer",
+      "position": { "x": 800, "y": 100 },
+      "data": {
+        "label": "정확도 시각화",
+        "color": "#22c55e",
+        "description": "Confusion Matrix 표시",
+        "config": {}
+      }
+    },
+    {
+      "id": "node_7",
+      "type": "export-excel",
+      "position": { "x": 800, "y": 200 },
+      "data": {
+        "label": "검증 리포트",
+        "color": "#22c55e",
+        "description": "정확도 분석 결과 저장",
+        "config": {
+          "output_path": "./output/validation_accuracy_report.xlsx",
+          "sheet_name": "Accuracy_Validation"
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "id": "edge_1", "source": "node_1", "target": "node_3" },
+    { "id": "edge_2", "source": "node_2", "target": "node_3" },
+    { "id": "edge_3", "source": "node_3", "target": "node_4" },
+    { "id": "edge_4", "source": "node_4", "target": "node_5" },
+    { "id": "edge_5", "source": "node_4", "target": "node_6" },
+    { "id": "edge_6", "source": "node_5", "target": "node_7" }
+  ],
+  "created_at": "2025-02-03T00:00:00.000Z",
+  "updated_at": "2025-02-03T00:00:00.000Z"
+}

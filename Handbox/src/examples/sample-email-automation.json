@@ -1,0 +1,126 @@
+{
+  "name": "이메일 자동 분류 및 응답",
+  "description": "수신 이메일을 자동으로 분류하고 초안 응답을 생성하는 워크플로우",
+  "nodes": [
+    {
+      "id": "node_input",
+      "type": "input",
+      "position": { "x": 50, "y": 200 },
+      "data": {
+        "label": "이메일 내용",
+        "color": "#22c55e",
+        "description": "수신 이메일",
+        "config": {
+          "inputType": "text",
+          "placeholder": "분석할 이메일 내용을 입력하세요..."
+        }
+      }
+    },
+    {
+      "id": "node_comprehend",
+      "type": "aws-comprehend",
+      "position": { "x": 250, "y": 100 },
+      "data": {
+        "label": "감정 분석",
+        "color": "#ff9900",
+        "description": "톤 파악",
+        "config": {
+          "languageCode": "ko",
+          "features": ["SENTIMENT", "KEY_PHRASES"]
+        }
+      }
+    },
+    {
+      "id": "node_classify_prompt",
+      "type": "prompt-template",
+      "position": { "x": 250, "y": 300 },
+      "data": {
+        "label": "이메일 분류",
+        "color": "#06b6d4",
+        "description": "유형 분류",
+        "config": {
+          "template": "다음 이메일을 분석하고 분류해주세요:\n\n{{input}}\n\n분석 항목:\n1. 이메일 유형: (문의, 요청, 불만, 감사, 정보 공유, 협업 제안, 기타)\n2. 긴급도: (긴급, 보통, 낮음)\n3. 필요한 조치: (즉시 응답, 검토 후 응답, 전달, 보관)\n4. 관련 부서: (영업, 기술지원, 인사, 재무, 기타)\n5. 핵심 요청 사항:\n6. 마감 기한 (있는 경우):\n\nJSON 형식으로 출력해주세요."
+        }
+      }
+    },
+    {
+      "id": "node_classifier",
+      "type": "model-claude-3-haiku",
+      "position": { "x": 500, "y": 200 },
+      "data": {
+        "label": "이메일 분류기",
+        "color": "#a855f7",
+        "description": "분류 분석",
+        "provider": "Anthropic",
+        "config": {
+          "system_prompt": "당신은 이메일 분류 전문가입니다. 이메일의 내용, 톤, 긴급도를 정확하게 파악하여 적절한 분류를 제공합니다.",
+          "temperature": 0.1,
+          "max_tokens": 1024
+        }
+      }
+    },
+    {
+      "id": "node_draft_prompt",
+      "type": "prompt-template",
+      "position": { "x": 750, "y": 200 },
+      "data": {
+        "label": "답장 초안",
+        "color": "#06b6d4",
+        "description": "응답 작성",
+        "config": {
+          "template": "다음 이메일 분석 결과를 바탕으로 전문적인 답장 초안을 작성해주세요:\n\n분석 결과:\n{{input}}\n\n답장 작성 가이드라인:\n1. 이메일 톤에 맞는 어조 사용\n2. 핵심 요청 사항에 대한 명확한 응답\n3. 필요한 경우 추가 정보 요청\n4. 다음 단계 또는 기대 일정 안내\n5. 적절한 인사말과 서명"
+        }
+      }
+    },
+    {
+      "id": "node_draft_writer",
+      "type": "model-claude-3-5-sonnet",
+      "position": { "x": 950, "y": 200 },
+      "data": {
+        "label": "답장 작성기",
+        "color": "#6366f1",
+        "description": "초안 생성",
+        "provider": "Anthropic",
+        "config": {
+          "system_prompt": "당신은 비즈니스 커뮤니케이션 전문가입니다. 상황에 맞는 전문적이고 효과적인 이메일을 작성합니다. 명확하고 간결하게 핵심을 전달하며, 적절한 어조를 유지합니다.",
+          "temperature": 0.5,
+          "max_tokens": 1024
+        }
+      }
+    },
+    {
+      "id": "node_merge",
+      "type": "merge",
+      "position": { "x": 500, "y": 100 },
+      "data": {
+        "label": "분석 통합",
+        "color": "#8b5cf6",
+        "description": "결과 병합",
+        "config": {}
+      }
+    },
+    {
+      "id": "node_output",
+      "type": "output",
+      "position": { "x": 1150, "y": 200 },
+      "data": {
+        "label": "처리 결과",
+        "color": "#ef4444",
+        "description": "분류 + 답장 초안",
+        "config": {
+          "outputFormat": "markdown"
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "node_input", "target": "node_comprehend", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e2", "source": "node_input", "target": "node_classify_prompt", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e3", "source": "node_comprehend", "target": "node_merge", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e4", "source": "node_classify_prompt", "target": "node_classifier", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e5", "source": "node_classifier", "target": "node_merge", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e6", "source": "node_merge", "target": "node_draft_prompt", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e7", "source": "node_draft_prompt", "target": "node_draft_writer", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e8", "source": "node_draft_writer", "target": "node_output", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } }
+  ]
+}

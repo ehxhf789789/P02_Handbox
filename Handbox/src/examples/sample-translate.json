@@ -1,0 +1,141 @@
+{
+  "name": "다국어 번역 파이프라인",
+  "description": "AWS Translate를 사용하여 텍스트를 다국어로 번역하는 워크플로우",
+  "nodes": [
+    {
+      "id": "node_input",
+      "type": "input",
+      "position": { "x": 50, "y": 150 },
+      "data": {
+        "label": "입력",
+        "color": "#22c55e",
+        "description": "시작",
+        "useCase": "원본 텍스트",
+        "config": {
+          "inputType": "text",
+          "sourceLanguage": "ko"
+        }
+      }
+    },
+    {
+      "id": "node_translate_en",
+      "type": "aws-translate",
+      "position": { "x": 300, "y": 50 },
+      "data": {
+        "label": "영어 번역",
+        "color": "#ff9900",
+        "description": "영어 번역",
+        "useCase": "한국어 → 영어",
+        "config": {
+          "source_lang": "ko",
+          "target_lang": "en"
+        }
+      }
+    },
+    {
+      "id": "node_translate_ja",
+      "type": "aws-translate",
+      "position": { "x": 300, "y": 150 },
+      "data": {
+        "label": "일본어 번역",
+        "color": "#ff9900",
+        "description": "일본어 번역",
+        "useCase": "한국어 → 일본어",
+        "config": {
+          "source_lang": "ko",
+          "target_lang": "ja"
+        }
+      }
+    },
+    {
+      "id": "node_translate_zh",
+      "type": "aws-translate",
+      "position": { "x": 300, "y": 250 },
+      "data": {
+        "label": "중국어 번역",
+        "color": "#ff9900",
+        "description": "중국어 번역",
+        "useCase": "한국어 → 중국어",
+        "config": {
+          "source_lang": "ko",
+          "target_lang": "zh"
+        }
+      }
+    },
+    {
+      "id": "node_merge",
+      "type": "merge",
+      "position": { "x": 550, "y": 150 },
+      "data": {
+        "label": "병합",
+        "color": "#c084fc",
+        "description": "결합",
+        "useCase": "번역 결과 통합",
+        "config": {}
+      }
+    },
+    {
+      "id": "node_output",
+      "type": "output",
+      "position": { "x": 750, "y": 150 },
+      "data": {
+        "label": "출력",
+        "color": "#ef4444",
+        "description": "종료",
+        "useCase": "다국어 번역 결과",
+        "config": {}
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "node_input",
+      "target": "node_translate_en",
+      "animated": true,
+      "style": { "stroke": "#6366f1", "strokeWidth": 2 }
+    },
+    {
+      "id": "e2",
+      "source": "node_input",
+      "target": "node_translate_ja",
+      "animated": true,
+      "style": { "stroke": "#6366f1", "strokeWidth": 2 }
+    },
+    {
+      "id": "e3",
+      "source": "node_input",
+      "target": "node_translate_zh",
+      "animated": true,
+      "style": { "stroke": "#6366f1", "strokeWidth": 2 }
+    },
+    {
+      "id": "e4",
+      "source": "node_translate_en",
+      "target": "node_merge",
+      "animated": true,
+      "style": { "stroke": "#6366f1", "strokeWidth": 2 }
+    },
+    {
+      "id": "e5",
+      "source": "node_translate_ja",
+      "target": "node_merge",
+      "animated": true,
+      "style": { "stroke": "#6366f1", "strokeWidth": 2 }
+    },
+    {
+      "id": "e6",
+      "source": "node_translate_zh",
+      "target": "node_merge",
+      "animated": true,
+      "style": { "stroke": "#6366f1", "strokeWidth": 2 }
+    },
+    {
+      "id": "e7",
+      "source": "node_merge",
+      "target": "node_output",
+      "animated": true,
+      "style": { "stroke": "#6366f1", "strokeWidth": 2 }
+    }
+  ]
+}

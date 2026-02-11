@@ -1,0 +1,69 @@
+{
+  "name": "특허 검색 및 분석",
+  "description": "KIPRIS API로 특허 검색 후 AI 분석",
+  "nodes": [
+    {
+      "id": "node_kipris",
+      "type": "api-kipris",
+      "position": { "x": 50, "y": 150 },
+      "data": {
+        "label": "KIPRIS 특허검색",
+        "color": "#f59e0b",
+        "description": "건설신기술 관련 특허 검색",
+        "config": {
+          "api_key": "",
+          "search_type": "patent",
+          "keyword": "건설신기술",
+          "page": 1,
+          "per_page": 10
+        }
+      }
+    },
+    {
+      "id": "node_prompt",
+      "type": "prompt-template",
+      "position": { "x": 300, "y": 150 },
+      "data": {
+        "label": "분석 프롬프트",
+        "color": "#06b6d4",
+        "description": "특허 분석 지시사항",
+        "config": {
+          "template": "다음 특허 검색 결과를 분석해주세요:\n\n{{input}}\n\n분석 항목:\n1. 주요 기술 분야별 분류\n2. 기술 트렌드 요약\n3. 핵심 특허 3개 선정 및 이유\n4. 관련 기술 키워드"
+        }
+      }
+    },
+    {
+      "id": "node_model",
+      "type": "model-claude-3-5-sonnet",
+      "position": { "x": 550, "y": 150 },
+      "data": {
+        "label": "Claude 분석",
+        "color": "#6366f1",
+        "description": "AI 특허 분석",
+        "config": {
+          "system_prompt": "당신은 특허 분석 전문가입니다. 기술 동향을 파악하고 핵심 특허를 식별합니다.",
+          "temperature": 0.3,
+          "max_tokens": 4096
+        }
+      }
+    },
+    {
+      "id": "node_output",
+      "type": "output",
+      "position": { "x": 800, "y": 150 },
+      "data": {
+        "label": "분석 결과",
+        "color": "#ef4444",
+        "description": "특허 분석 리포트",
+        "config": {
+          "output_format": "markdown"
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "node_kipris", "target": "node_prompt", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e2", "source": "node_prompt", "target": "node_model", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e3", "source": "node_model", "target": "node_output", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } }
+  ]
+}

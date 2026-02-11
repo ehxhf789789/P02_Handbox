@@ -1,0 +1,126 @@
+{
+  "name": "다국어 콘텐츠 생성",
+  "description": "하나의 콘텐츠를 여러 언어로 번역하고 현지화하는 워크플로우",
+  "nodes": [
+    {
+      "id": "node_input",
+      "type": "input",
+      "position": { "x": 50, "y": 200 },
+      "data": {
+        "label": "원본 콘텐츠",
+        "color": "#22c55e",
+        "description": "번역할 텍스트",
+        "config": {
+          "inputType": "text",
+          "placeholder": "번역할 콘텐츠를 입력하세요..."
+        }
+      }
+    },
+    {
+      "id": "node_translate_en",
+      "type": "aws-translate",
+      "position": { "x": 300, "y": 50 },
+      "data": {
+        "label": "영어 번역",
+        "color": "#ff9900",
+        "description": "English",
+        "config": {
+          "source_language": "ko",
+          "target_language": "en"
+        }
+      }
+    },
+    {
+      "id": "node_translate_ja",
+      "type": "aws-translate",
+      "position": { "x": 300, "y": 200 },
+      "data": {
+        "label": "일본어 번역",
+        "color": "#ff9900",
+        "description": "日本語",
+        "config": {
+          "source_language": "ko",
+          "target_language": "ja"
+        }
+      }
+    },
+    {
+      "id": "node_translate_zh",
+      "type": "aws-translate",
+      "position": { "x": 300, "y": 350 },
+      "data": {
+        "label": "중국어 번역",
+        "color": "#ff9900",
+        "description": "中文",
+        "config": {
+          "source_language": "ko",
+          "target_language": "zh"
+        }
+      }
+    },
+    {
+      "id": "node_localize_prompt",
+      "type": "prompt-template",
+      "position": { "x": 550, "y": 200 },
+      "data": {
+        "label": "현지화 검토",
+        "color": "#06b6d4",
+        "description": "문화적 적합성",
+        "config": {
+          "template": "다음 번역된 콘텐츠들을 검토하고, 각 언어권의 문화적 맥락에 맞게 개선점을 제안해주세요.\n\n번역 결과:\n{{input}}\n\n각 언어별로:\n1. 자연스러운 표현인지\n2. 문화적으로 적절한지\n3. 개선이 필요한 부분\n을 분석해주세요."
+        }
+      }
+    },
+    {
+      "id": "node_reviewer",
+      "type": "model-claude-3-5-sonnet",
+      "position": { "x": 750, "y": 200 },
+      "data": {
+        "label": "현지화 전문가",
+        "color": "#6366f1",
+        "description": "다국어 검토",
+        "provider": "Anthropic",
+        "config": {
+          "system_prompt": "당신은 다국어 현지화 전문가입니다. 영어, 일본어, 중국어에 능통하며 각 문화권의 뉘앙스를 이해합니다.",
+          "temperature": 0.4,
+          "max_tokens": 2048
+        }
+      }
+    },
+    {
+      "id": "node_merge",
+      "type": "merge",
+      "position": { "x": 550, "y": 50 },
+      "data": {
+        "label": "결과 병합",
+        "color": "#8b5cf6",
+        "description": "번역 통합",
+        "config": {}
+      }
+    },
+    {
+      "id": "node_output",
+      "type": "output",
+      "position": { "x": 950, "y": 200 },
+      "data": {
+        "label": "다국어 결과",
+        "color": "#ef4444",
+        "description": "번역 및 검토 결과",
+        "config": {
+          "outputFormat": "markdown"
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "node_input", "target": "node_translate_en", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e2", "source": "node_input", "target": "node_translate_ja", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e3", "source": "node_input", "target": "node_translate_zh", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e4", "source": "node_translate_en", "target": "node_merge", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e5", "source": "node_translate_ja", "target": "node_merge", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e6", "source": "node_translate_zh", "target": "node_merge", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e7", "source": "node_merge", "target": "node_localize_prompt", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e8", "source": "node_localize_prompt", "target": "node_reviewer", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e9", "source": "node_reviewer", "target": "node_output", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } }
+  ]
+}

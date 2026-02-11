@@ -1,0 +1,114 @@
+{
+  "name": "회의록 분석 및 정리",
+  "description": "회의 내용을 분석하여 핵심 사항, 액션 아이템, 결정 사항을 추출하는 워크플로우",
+  "nodes": [
+    {
+      "id": "node_input",
+      "type": "input",
+      "position": { "x": 50, "y": 150 },
+      "data": {
+        "label": "회의 내용",
+        "color": "#22c55e",
+        "description": "회의록/녹취록",
+        "config": {
+          "inputType": "text",
+          "placeholder": "회의 내용이나 녹취록을 입력하세요..."
+        }
+      }
+    },
+    {
+      "id": "node_comprehend",
+      "type": "aws-comprehend",
+      "position": { "x": 250, "y": 50 },
+      "data": {
+        "label": "핵심 구문 추출",
+        "color": "#ff9900",
+        "description": "NLP 분석",
+        "config": {
+          "languageCode": "ko",
+          "features": ["KEY_PHRASES", "ENTITIES"]
+        }
+      }
+    },
+    {
+      "id": "node_summary_prompt",
+      "type": "prompt-template",
+      "position": { "x": 250, "y": 200 },
+      "data": {
+        "label": "요약 프롬프트",
+        "color": "#06b6d4",
+        "description": "회의 요약",
+        "config": {
+          "template": "다음 회의 내용을 분석하여 체계적으로 정리해주세요:\n\n{{input}}\n\n## 회의 개요\n- 참석자:\n- 주요 안건:\n\n## 논의 내용 요약\n\n## 주요 결정 사항\n\n## 액션 아이템 (담당자 | 기한)\n\n## 다음 회의 안건"
+        }
+      }
+    },
+    {
+      "id": "node_analyzer",
+      "type": "model-claude-3-5-sonnet",
+      "position": { "x": 500, "y": 150 },
+      "data": {
+        "label": "회의 분석가",
+        "color": "#6366f1",
+        "description": "회의록 전문가",
+        "provider": "Anthropic",
+        "config": {
+          "system_prompt": "당신은 회의록 작성 전문가입니다. 회의 내용에서 핵심 정보를 추출하고 체계적으로 정리합니다. 액션 아이템은 구체적이고 측정 가능하게 작성합니다.",
+          "temperature": 0.3,
+          "max_tokens": 3000
+        }
+      }
+    },
+    {
+      "id": "node_action_prompt",
+      "type": "prompt-template",
+      "position": { "x": 750, "y": 150 },
+      "data": {
+        "label": "액션 추출",
+        "color": "#06b6d4",
+        "description": "할일 목록",
+        "config": {
+          "template": "분석된 회의 내용에서 액션 아이템을 더 상세하게 추출해주세요:\n\n{{input}}\n\n각 액션 아이템에 대해:\n1. 담당자 (추정)\n2. 구체적인 할 일\n3. 예상 기한\n4. 우선순위 (상/중/하)\n5. 의존성 (다른 작업과의 관계)\n\n을 포함하여 작성해주세요."
+        }
+      }
+    },
+    {
+      "id": "node_task_generator",
+      "type": "model-claude-3-haiku",
+      "position": { "x": 950, "y": 150 },
+      "data": {
+        "label": "태스크 생성기",
+        "color": "#a855f7",
+        "description": "액션 정리",
+        "provider": "Anthropic",
+        "config": {
+          "system_prompt": "당신은 프로젝트 매니저입니다. 액션 아이템을 실행 가능한 태스크로 변환합니다.",
+          "temperature": 0.2,
+          "max_tokens": 2048
+        }
+      }
+    },
+    {
+      "id": "node_output",
+      "type": "output",
+      "position": { "x": 1150, "y": 150 },
+      "data": {
+        "label": "회의록 결과",
+        "color": "#ef4444",
+        "description": "정리된 회의록",
+        "config": {
+          "outputFormat": "markdown"
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "node_input", "target": "node_comprehend", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e2", "source": "node_input", "target": "node_summary_prompt", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e3", "source": "node_comprehend", "target": "node_analyzer", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e4", "source": "node_summary_prompt", "target": "node_analyzer", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e5", "source": "node_analyzer", "target": "node_action_prompt", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e6", "source": "node_action_prompt", "target": "node_task_generator", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } },
+    { "id": "e7", "source": "node_task_generator", "target": "node_output", "animated": true, "style": { "stroke": "#6366f1", "strokeWidth": 2 } }
+  ]
+}

@@ -1,0 +1,95 @@
+﻿{
+  "id": "cnt-phase1-static-kb",
+  "name": "[Phase 1-1] 정적 지식베이스 구축",
+  "description": "CNT 평가 매뉴얼 + 상세 평가기준 → Static KB",
+  "category": "CNT 평가 연구",
+  "nodes": [
+    {
+      "id": "node_1",
+      "type": "local-folder",
+      "position": { "x": 0, "y": 0 },
+      "data": {
+        "label": "CNT 평가 매뉴얼",
+        "color": "#ef4444",
+        "description": "건설신기술 작성지침/매뉴얼",
+        "config": { "folder_path": "", "file_filter": "*.pdf;*.hwp;*.docx", "read_content": true }
+      }
+    },
+    {
+      "id": "node_2",
+      "type": "local-folder",
+      "position": { "x": 0, "y": 120 },
+      "data": {
+        "label": "상세 평가기준",
+        "color": "#f97316",
+        "description": "신규성/진보성/현장적용성/경제성 기준",
+        "config": { "folder_path": "", "file_filter": "*.pdf;*.hwp;*.xlsx", "read_content": true }
+      }
+    },
+    {
+      "id": "node_3",
+      "type": "doc-pdf-parser",
+      "position": { "x": 220, "y": 0 },
+      "data": { "label": "PDF 파싱", "color": "#ef4444", "description": "매뉴얼 텍스트 추출", "config": {} }
+    },
+    {
+      "id": "node_4",
+      "type": "doc-hwp-parser",
+      "position": { "x": 220, "y": 120 },
+      "data": { "label": "HWP 파싱", "color": "#3b82f6", "description": "한글문서 추출", "config": {} }
+    },
+    {
+      "id": "node_5",
+      "type": "merge",
+      "position": { "x": 420, "y": 60 },
+      "data": { "label": "문서 병합", "color": "#c084fc", "description": "매뉴얼+평가기준 통합", "config": {} }
+    },
+    {
+      "id": "node_6",
+      "type": "text-splitter",
+      "position": { "x": 620, "y": 60 },
+      "data": {
+        "label": "청킹",
+        "color": "#c084fc",
+        "description": "의미 단위 분할",
+        "config": { "chunk_size": 1500, "overlap": 300, "strategy": "semantic" }
+      }
+    },
+    {
+      "id": "node_7",
+      "type": "embedder",
+      "position": { "x": 820, "y": 60 },
+      "data": {
+        "label": "임베딩",
+        "color": "#d8b4fe",
+        "description": "Titan Embed v2",
+        "config": { "model": "amazon.titan-embed-text-v2:0" }
+      }
+    },
+    {
+      "id": "node_8",
+      "type": "vector-opensearch",
+      "position": { "x": 1020, "y": 60 },
+      "data": {
+        "label": "Static KB",
+        "color": "#ff9900",
+        "description": "정적 지식베이스",
+        "config": {
+          "index_name": "cnt_static_kb",
+          "persist": true
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "id": "edge_1", "source": "node_1", "target": "node_3" },
+    { "id": "edge_2", "source": "node_2", "target": "node_4" },
+    { "id": "edge_3", "source": "node_3", "target": "node_5" },
+    { "id": "edge_4", "source": "node_4", "target": "node_5" },
+    { "id": "edge_5", "source": "node_5", "target": "node_6" },
+    { "id": "edge_6", "source": "node_6", "target": "node_7" },
+    { "id": "edge_7", "source": "node_7", "target": "node_8" }
+  ],
+  "created_at": "2025-02-03T00:00:00.000Z",
+  "updated_at": "2025-02-03T00:00:00.000Z"
+}
