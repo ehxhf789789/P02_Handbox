@@ -65,6 +65,7 @@ import { useDragStore } from '../../stores/dragStore'
 import GenericNode from '../../nodes/GenericNode'
 import InputNode from '../../nodes/InputNode'
 import OutputNode from '../../nodes/OutputNode'
+import { validateConnection } from '../../engine/ExecutionEngine'
 
 // 그룹 노드 컴포넌트 - 메모이제이션
 const GroupNode = memo(function GroupNode({ data }: { data: { label: string; color: string } }) {
@@ -250,6 +251,27 @@ const WorkflowEditorInner = memo(function WorkflowEditorInner() {
     reactFlowInstance.current = instance
   }, [])
 
+  // 포트 타입 호환성 검증 (연결 시도 시 호출)
+  const isValidConnection = useCallback((connection: { source: string | null; target: string | null; sourceHandle: string | null; targetHandle: string | null }) => {
+    if (!connection.source || !connection.target) return false
+    // 자기 자신에게 연결 방지
+    if (connection.source === connection.target) return false
+    // 포트 타입 검증
+    const sourceNode = nodes.find(n => n.id === connection.source)
+    const targetNode = nodes.find(n => n.id === connection.target)
+    if (!sourceNode || !targetNode) return true
+    const result = validateConnection(
+      sourceNode.type || '',
+      connection.sourceHandle,
+      targetNode.type || '',
+      connection.targetHandle,
+    )
+    if (!result.valid) {
+      console.warn(`[ConnectionValidator] ${result.reason}`)
+    }
+    return result.valid
+  }, [nodes])
+
   // 워크플로우의 모든 노드 타입이 등록되어 있는지 확인 (동적 등록)
   useEffect(() => {
     let needsUpdate = false
@@ -383,6 +405,7 @@ const WorkflowEditorInner = memo(function WorkflowEditorInner() {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        isValidConnection={isValidConnection}
         onInit={onInit}
         onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}

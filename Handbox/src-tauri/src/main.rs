@@ -54,6 +54,10 @@ fn main() {
             commands::file_system::parse_pdf,
             commands::file_system::select_file,
             commands::file_system::select_folder,
+
+            // CLI / 스크립트 실행
+            commands::cli::execute_cli,
+            commands::cli::execute_python_script,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

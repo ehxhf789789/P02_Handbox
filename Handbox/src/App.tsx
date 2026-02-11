@@ -6,6 +6,14 @@ import { loadSavedCredentials, saveCredentials, clearSavedCredentials } from './
 import MainLayout from './components/MainLayout'
 import { useAppStore } from './stores/appStore'
 import HandboxIcon from '@mui/icons-material/Hub'
+import { registerBuiltinExecutors } from './executors'
+import { registerBuiltinProviders } from './providers'
+import { registerBuiltinPlugins } from './plugins'
+
+// 앱 시작 시 내장 executor, 프로바이더, 플러그인 일괄 등록
+registerBuiltinExecutors()
+registerBuiltinProviders()
+registerBuiltinPlugins()
 
 function App() {
   const { isAuthenticated, setAuthenticated, setAWSStatus, skipAWSLogin, setUseAWSConnection } = useAppStore()

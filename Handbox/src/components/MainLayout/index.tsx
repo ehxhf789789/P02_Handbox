@@ -26,6 +26,7 @@ import LogoutIcon from '@mui/icons-material/Logout'
 import PersonIcon from '@mui/icons-material/Person'
 import ApiIcon from '@mui/icons-material/Api'
 
+import { serializeWorkflow, downloadWorkflow, parseWorkflowJSON, deserializeWorkflow } from '../../utils/workflowSerializer'
 import NodePalette from '../NodePalette'
 import AISettingsDialog from '../AISettingsDialog'
 import MCPSettingsDialog from '../MCPSettingsDialog'
@@ -91,6 +92,7 @@ const SAMPLE_WORKFLOWS = [
 import PropertyPanel from '../PropertyPanel'
 import { useAppStore } from '../../stores/appStore'
 import { useWorkflowStore } from '../../stores/workflowStore'
+import { useExecutionStore } from '../../stores/executionStore'
 import { invoke } from '@tauri-apps/api/tauri'
 
 const DRAWER_WIDTH = 300
@@ -107,6 +109,7 @@ interface SavedWorkflow {
 function MainLayoutContent() {
   const { awsStatus, sidebarOpen, toggleSidebar, logout, setUseAWSConnection, setAWSStatus, aiModelConfig } = useAppStore()
   const { nodes, edges, selectedNode, setNodes, setEdges, clearWorkflow, updateNode } = useWorkflowStore()
+  const { runWorkflow, isWorkflowRunning } = useExecutionStore()
   const [executing, setExecuting] = useState(false)
   const [userMenuAnchor, setUserMenuAnchor] = useState<null | HTMLElement>(null)
   const [logoutDialogOpen, setLogoutDialogOpen] = useState(false)
@@ -192,98 +195,39 @@ function MainLayoutContent() {
       return
     }
 
-    // 입력 노드에서 입력 데이터 추출
-    const inputNode = nodes.find((n) => n.type === 'input')
-    let inputData: Record<string, any> = {}
-
-    if (inputNode?.data?.config) {
-      const config = inputNode.data.config
-      // 텍스트 입력이 있으면 사용
-      if (config.text_input) {
-        inputData = { query: config.text_input, text: config.text_input }
-      }
-      // JSON 입력이 있으면 파싱해서 사용
-      if (config.json_input) {
-        try {
-          const jsonData = JSON.parse(config.json_input)
-          inputData = { ...inputData, ...jsonData }
-        } catch (e) {
-          console.log('JSON 파싱 실패, 텍스트로 사용:', config.json_input)
-        }
-      }
-    }
-
     setExecuting(true)
     try {
-      const result = await invoke<any>('execute_workflow', {
-        workflow: {
-          id: currentWorkflowId || 'temp',
-          name: workflowName || '임시 워크플로우',
-          description: workflowDescription,
-          nodes: nodes.map((n) => ({ id: n.id, node_type: n.type, position: n.position, data: n.data })),
-          edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, source_handle: e.sourceHandle, target_handle: e.targetHandle })),
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-        input: inputData,
-      })
+      // 새 ExecutionEngine으로 실행 (NodeRegistry 기반)
+      await runWorkflow(nodes, edges)
 
-      // 실행 결과를 출력 노드에 저장
-      if (result?.outputs) {
-        const outputNodeResult = result.outputs.find((o: any) => {
-          const node = nodes.find((n) => n.id === o.node_id)
-          return node?.type === 'output'
-        })
+      // 실행 완료 후 결과를 출력 노드에 반영
+      const execResults = useExecutionStore.getState().nodeExecutionResults
+      const outputNode = nodes.find((n) => n.type === 'output')
+      if (outputNode) {
+        // 출력 노드에 연결된 소스 노드의 결과를 가져옴
+        const incomingEdge = edges.find(e => e.target === outputNode.id)
+        const sourceResult = incomingEdge ? execResults[incomingEdge.source] : null
 
-        // 결과 텍스트 포맷팅 함수
-        const formatResultText = (output: any): string => {
-          if (typeof output !== 'object') return String(output)
-
-          // merge 노드 결과인 경우 summary 사용
-          if (output.type === 'merge' && output.summary) {
-            return output.summary
-          }
-
-          // 중첩된 merge 결과 확인 (출력 노드가 merge 결과를 받은 경우)
-          const mergeResult = Object.values(output).find((v: any) => v?.type === 'merge' && v?.summary)
-          if (mergeResult && typeof mergeResult === 'object' && 'summary' in mergeResult) {
-            return (mergeResult as { summary: string }).summary
-          }
-
-          // 번역 결과인 경우
-          if (output.translated_text) {
-            const langName = { en: '영어', ja: '일본어', zh: '중국어', ko: '한국어' }[output.target_language as string] || output.target_language
-            return `✅ 번역 완료 (${langName})\n\n${output.translated_text}`
-          }
-
-          // 일반적인 경우 JSON으로 출력
-          return JSON.stringify(output, null, 2)
-        }
-
-        if (outputNodeResult) {
-          const outputNode = nodes.find((n) => n.type === 'output')
-          if (outputNode) {
-            const resultText = formatResultText(outputNodeResult.output)
-            updateNode(outputNode.id, {
-              config: { ...outputNode.data?.config, result: resultText },
-            })
-            console.log('실행 결과:', resultText)
-          }
-        } else {
-          // 출력 노드에 직접 연결된 결과가 없으면 마지막 결과를 사용
-          const outputNode = nodes.find((n) => n.type === 'output')
-          if (outputNode && result.outputs.length > 0) {
-            const lastOutput = result.outputs[result.outputs.length - 1]
-            const resultText = formatResultText(lastOutput.output)
-            updateNode(outputNode.id, {
-              config: { ...outputNode.data?.config, result: resultText },
-            })
-            console.log('실행 결과 (마지막):', resultText)
-          }
+        if (sourceResult?.output) {
+          const resultText = sourceResult.output.text
+            || sourceResult.output.status
+            || JSON.stringify(sourceResult.output, null, 2)
+          updateNode(outputNode.id, {
+            config: { ...outputNode.data?.config, result: resultText },
+          })
         }
       }
 
-      setSnackbar({ open: true, message: '워크플로우 실행 완료!', severity: 'success' })
+      // 에러가 있는 노드 확인
+      const errorNodes = Object.entries(execResults)
+        .filter(([_, r]) => r.status === 'error')
+        .map(([id, r]) => `${id}: ${r.error}`)
+
+      if (errorNodes.length > 0) {
+        setSnackbar({ open: true, message: `실행 완료 (${errorNodes.length}개 오류)`, severity: 'info' })
+      } else {
+        setSnackbar({ open: true, message: '워크플로우 실행 완료!', severity: 'success' })
+      }
     } catch (error) {
       setSnackbar({ open: true, message: `실행 실패: ${error}`, severity: 'error' })
     } finally {
@@ -429,30 +373,22 @@ function MainLayoutContent() {
                   const reader = new FileReader()
                   reader.onload = (event) => {
                     try {
-                      const data = JSON.parse(event.target?.result as string)
-                      if (data.nodes && data.edges) {
-                        setCurrentWorkflowId(null)
-                        setWorkflowName(data.name || 'Imported Workflow')
-                        setWorkflowDescription(data.description || '')
-                        setNodes(data.nodes.map((n: any) => ({
-                          id: n.id,
-                          type: n.type || n.node_type,
-                          position: n.position,
-                          data: n.data,
-                        })))
-                        setEdges(data.edges.map((edge: any) => ({
-                          id: edge.id,
-                          source: edge.source,
-                          target: edge.target,
-                          sourceHandle: edge.sourceHandle || edge.source_handle,
-                          targetHandle: edge.targetHandle || edge.target_handle,
-                          animated: true,
-                          style: { stroke: '#10b981', strokeWidth: 2 },
-                        })))
-                        setSnackbar({ open: true, message: `워크플로우 "${data.name || file.name}"을(를) 가져왔습니다.`, severity: 'success' })
-                      } else {
-                        setSnackbar({ open: true, message: '올바른 워크플로우 JSON 파일이 아닙니다.', severity: 'error' })
+                      const jsonStr = event.target?.result as string
+                      const { workflow, validation } = parseWorkflowJSON(jsonStr)
+                      if (!validation.valid) {
+                        setSnackbar({ open: true, message: `워크플로우 검증 실패: ${validation.errors[0]}`, severity: 'error' })
+                        return
                       }
+                      if (validation.warnings.length > 0) {
+                        console.warn('[Import] 워크플로우 경고:', validation.warnings)
+                      }
+                      const { nodes: importedNodes, edges: importedEdges, meta, id } = deserializeWorkflow(workflow)
+                      setCurrentWorkflowId(id)
+                      setWorkflowName(meta.name)
+                      setWorkflowDescription(meta.description || '')
+                      setNodes(importedNodes)
+                      setEdges(importedEdges)
+                      setSnackbar({ open: true, message: `워크플로우 "${meta.name}"을(를) 가져왔습니다.`, severity: 'success' })
                     } catch (err) {
                       setSnackbar({ open: true, message: 'JSON 파일 파싱 실패', severity: 'error' })
                     }
@@ -461,6 +397,24 @@ function MainLayoutContent() {
                 }
                 e.target.value = ''
               }} />
+            </IconButton>
+          </Tooltip>
+
+          <Tooltip title="워크플로우 내보내기 (JSON)">
+            <IconButton onClick={() => {
+              if (nodes.length === 0) {
+                setSnackbar({ open: true, message: '내보낼 노드가 없습니다.', severity: 'error' })
+                return
+              }
+              const wf = serializeWorkflow(nodes, edges, {
+                name: workflowName || 'Untitled Workflow',
+                description: workflowDescription,
+                id: currentWorkflowId || undefined,
+              })
+              downloadWorkflow(wf)
+              setSnackbar({ open: true, message: '워크플로우를 내보냈습니다.', severity: 'success' })
+            }} sx={{ color: 'rgba(255,255,255,0.7)', '&:hover': { color: '#10b981', background: 'rgba(16, 185, 129, 0.1)' } }}>
+              <FileDownloadIcon />
             </IconButton>
           </Tooltip>
 
@@ -476,10 +430,10 @@ function MainLayoutContent() {
             variant="contained"
             startIcon={<PlayArrowIcon />}
             onClick={handleExecute}
-            disabled={executing || nodes.length === 0}
-            sx={{ px: 3, background: executing ? 'rgba(99, 102, 241, 0.5)' : 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)', boxShadow: executing ? 'none' : '0 4px 15px rgba(34, 197, 94, 0.3)', '&:disabled': { background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.3)' } }}
+            disabled={executing || isWorkflowRunning || nodes.length === 0}
+            sx={{ px: 3, background: (executing || isWorkflowRunning) ? 'rgba(99, 102, 241, 0.5)' : 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)', boxShadow: (executing || isWorkflowRunning) ? 'none' : '0 4px 15px rgba(34, 197, 94, 0.3)', '&:disabled': { background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.3)' } }}
           >
-            {executing ? '실행 중...' : '실행'}
+            {(executing || isWorkflowRunning) ? '실행 중...' : '실행'}
           </Button>
 
           <Divider orientation="vertical" flexItem sx={{ mx: 1, borderColor: 'rgba(255,255,255,0.1)' }} />
@@ -759,21 +713,12 @@ function MainLayoutContent() {
         </DialogContent>
         <DialogActions sx={{ p: 2, borderTop: '1px solid rgba(255,255,255,0.1)', justifyContent: 'space-between' }}>
           <Button startIcon={<FileDownloadIcon />} onClick={() => {
-            const workflowData = {
-              id: currentWorkflowId || `workflow_${Date.now()}`,
-              name: workflowName,
+            const wf = serializeWorkflow(nodes, edges, {
+              name: workflowName || 'workflow',
               description: workflowDescription,
-              nodes: nodes.map((n) => ({ id: n.id, type: n.type, position: n.position, data: n.data })),
-              edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle, targetHandle: e.targetHandle })),
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            }
-            const blob = new Blob([JSON.stringify(workflowData, null, 2)], { type: 'application/json' })
-            const url = URL.createObjectURL(blob)
-            const a = document.createElement('a')
-            a.href = url
-            a.download = `${workflowName || 'workflow'}.json`
-            a.click()
+              id: currentWorkflowId || undefined,
+            })
+            downloadWorkflow(wf)
             setSnackbar({ open: true, message: '워크플로우를 파일로 내보냈습니다.', severity: 'success' })
           }} sx={{ color: '#6ee7b7' }}>JSON 내보내기</Button>
           <Box>

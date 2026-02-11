@@ -33,6 +33,8 @@ import { useWorkflowStore } from '../../stores/workflowStore'
 import { invoke } from '@tauri-apps/api/tauri'
 import OutputDisplay from '../OutputDisplay'
 import { shallow } from 'zustand/shallow'
+import { NodeRegistry } from '../../registry/NodeRegistry'
+import ConfigSchemaRenderer from '../ConfigSchemaRenderer'
 
 // 노드 타입 → Bedrock 모델 ID 매핑
 const MODEL_ID_MAP: Record<string, string> = {
@@ -2538,11 +2540,12 @@ function PropertyPanelContent() {
 
   // 노드 타입별 설정 렌더링
   const renderConfig = () => {
+    // 레거시 하드코딩 매칭 (기존 노드)
     if (type?.startsWith('model-')) return renderModelConfig()
     if (type?.includes('agent')) return renderAgentConfig()
     if (type?.startsWith('bedrock-')) return renderBedrockPlatformConfig()
     if (type?.startsWith('aws-')) return renderAWSServiceConfig()
-    if (type?.startsWith('api-') || type?.startsWith('kisti-')) return renderAPIConfig()  // KISTI 노드 추가
+    if (type?.startsWith('api-') || type?.startsWith('kisti-')) return renderAPIConfig()
     if (type?.startsWith('viz-')) return renderVisualizationConfig()
     if (type?.startsWith('doc-')) return renderDocParserConfig()
     if (type?.startsWith('export-')) return renderExportConfig()
@@ -2552,6 +2555,19 @@ function PropertyPanelContent() {
     if (['knowledge-base', 'document-loader', 'text-splitter', 'embedder', 'vector-search', 'vector-store', 'rag-retriever'].includes(type || '')) return renderDataConfig()
     if (['input', 'output', 'local-folder', 'local-file'].includes(type || '')) return renderIOConfig()
     if (['prompt-template', 'conditional', 'loop', 'merge'].includes(type || '')) return renderControlConfig()
+
+    // Registry 기반 자동 렌더링 (새 노드: CLI, Script, HTTP, SubWorkflow 등)
+    const definition = NodeRegistry.get(type || '')
+    if (definition && definition.configSchema.length > 0) {
+      return (
+        <ConfigSchemaRenderer
+          fields={definition.configSchema}
+          values={data.config || {}}
+          onChange={handleChange}
+        />
+      )
+    }
+
     return null
   }
 

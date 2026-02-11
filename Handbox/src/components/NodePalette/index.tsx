@@ -43,6 +43,9 @@ import { useDragStore } from '../../stores/dragStore'
 import { useWorkflowStore, NodeTemplate } from '../../stores/workflowStore'
 import { useAppStore } from '../../stores/appStore'
 import { NODE_TEMPLATES, TEMPLATE_CATEGORIES } from '../../data/nodeTemplates'
+import { NodeRegistry } from '../../registry/NodeRegistry'
+import { getIcon } from '../../utils/iconMap'
+import type { NodeDefinition } from '../../registry/NodeDefinition'
 
 // 템플릿 아이콘 이름 → React 컴포넌트 매핑
 const TEMPLATE_ICON_MAP: Record<string, React.ReactNode> = {
@@ -188,12 +191,102 @@ const NODE_CATEGORIES = [
 // 모든 노드를 하나의 배열로
 const ALL_NODES = NODE_CATEGORIES.flatMap(cat => cat.nodes)
 
+/** NodeDefinition → NodeTypeConfig 변환 (Registry 노드를 기존 UI와 호환) */
+function definitionToConfig(def: NodeDefinition): NodeTypeConfig {
+  return {
+    type: def.type,
+    label: def.meta.label,
+    icon: getIcon(def.meta.icon, { fontSize: 18 }),
+    color: def.meta.color,
+    description: def.meta.description,
+    keywords: def.meta.tags,
+    authRequired: def.requirements?.provider === 'aws' ? 'aws' : 'none',
+    stub: def.stub,
+    provider: def.requirements?.provider,
+  }
+}
+
+/** 하드코딩 목록에 없는 Registry 전용 노드를 수집 */
+function getRegistryOnlyNodes(): NodeTypeConfig[] {
+  const hardcodedTypes = new Set(ALL_NODES.map(n => n.type))
+  return NodeRegistry.getAll()
+    .filter(def => !hardcodedTypes.has(def.type) && !def.type.includes('legacy:'))
+    .map(definitionToConfig)
+}
+
 export default function NodePalette() {
   const { startDrag, updatePosition } = useDragStore()
   const { addTemplate } = useWorkflowStore()
   const { useAWSConnection, awsStatus, externalAPIs } = useAppStore()
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState(0)
+
+  // Registry에서 추가 노드 가져오기 (하드코딩에 없는 것만)
+  const registryExtraNodes = useMemo(() => getRegistryOnlyNodes(), [])
+  const allNodesWithRegistry = useMemo(() => [...ALL_NODES, ...registryExtraNodes], [registryExtraNodes])
+
+  // Registry 기반 카테고리 (레거시 노드 + Registry 전용 노드를 카테고리별 병합)
+  const registryCategories = useMemo(() => {
+    const grouped = NodeRegistry.getGroupedByCategory()
+    const categories = NodeRegistry.getCategories()
+    const result: { id: string; title: string; icon: React.ReactNode; nodes: NodeTypeConfig[]; defaultExpanded: boolean }[] = []
+
+    // 하드코딩 노드를 type으로 인덱싱
+    const hardcodedSet = new Set(ALL_NODES.map(n => n.type))
+
+    for (const cat of categories) {
+      const defs = grouped.get(cat.id) || []
+      // Registry 노드 중 legacy 태그 없는 것만 (중복 방지)
+      const registryNodes = defs
+        .filter(d => !d.meta.tags.some(t => t.startsWith('legacy:')))
+        .map(definitionToConfig)
+
+      // 해당 카테고리의 하드코딩 노드 (category 매핑)
+      const catMap: Record<string, string[]> = {
+        'io': ['input', 'output', 'local-folder', 'local-file'],
+        'convert': ['doc-pdf-parser', 'doc-hwp-parser', 'doc-word-parser', 'doc-excel-parser'],
+        'text': ['text-splitter', 'prompt-template'],
+        'vector': ['embedder', 'vector-store', 'rag-retriever'],
+        'ai': ['model-claude-3-5-sonnet', 'model-claude-3-opus', 'model-claude-3-haiku', 'custom-agent'],
+        'control': ['merge', 'conditional'],
+        'export': ['export-excel', 'export-pdf'],
+        'viz': ['viz-result-viewer', 'viz-evaluator-result', 'viz-vote-chart', 'viz-citation', 'viz-json-viewer', 'viz-chart'],
+        'api': ['api-kipris', 'api-data-go-kr'],
+      }
+      const hardcodedTypes = catMap[cat.id] || []
+      const hardcodedNodes = hardcodedTypes
+        .map(t => ALL_NODES.find(n => n.type === t))
+        .filter((n): n is NodeTypeConfig => !!n)
+
+      // Registry 노드에서 이미 하드코딩에 있는 것은 제외
+      const extraRegistryNodes = registryNodes.filter(n => !hardcodedSet.has(n.type))
+
+      const allCatNodes = [...hardcodedNodes, ...extraRegistryNodes]
+      if (allCatNodes.length === 0) continue
+
+      result.push({
+        id: cat.id,
+        title: cat.label,
+        icon: getIcon(cat.icon, { fontSize: 18 }),
+        nodes: allCatNodes,
+        defaultExpanded: cat.defaultExpanded,
+      })
+    }
+
+    // KISTI 카테고리 (plugin에서 등록, 카테고리가 DEFAULT에 없을 수 있음)
+    const kistiNodes = ALL_NODES.filter(n => n.type.startsWith('kisti-'))
+    if (kistiNodes.length > 0 && !result.find(r => r.id === 'kisti')) {
+      result.push({
+        id: 'kisti',
+        title: 'KISTI ScienceON',
+        icon: getIcon('Science', { fontSize: 18 }),
+        nodes: kistiNodes,
+        defaultExpanded: false,
+      })
+    }
+
+    return result
+  }, [registryExtraNodes])
 
   // 인증 상태 확인 헬퍼
   const isAuthMet = (authRequired?: AuthRequirement): boolean => {
@@ -215,18 +308,18 @@ export default function NodePalette() {
     return ''
   }
 
-  // 검색 필터링
+  // 검색 필터링 (하드코딩 + Registry 노드 모두 포함)
   const filteredNodes = useMemo(() => {
     if (!searchQuery.trim()) return null
     const query = searchQuery.toLowerCase()
-    return ALL_NODES.filter(node =>
+    return allNodesWithRegistry.filter(node =>
       node.label.toLowerCase().includes(query) ||
       node.description.toLowerCase().includes(query) ||
       node.useCase?.toLowerCase().includes(query) ||
       node.provider?.toLowerCase().includes(query) ||
       node.keywords?.some(k => k.toLowerCase().includes(query))
     )
-  }, [searchQuery])
+  }, [searchQuery, allNodesWithRegistry])
 
   const filteredTemplates = useMemo(() => {
     if (!searchQuery.trim()) return null
@@ -521,14 +614,14 @@ export default function NodePalette() {
                 })}
               </>
             ) : (
-              // 노드 탭
+              // 노드 탭 — Registry 기반 카테고리
               <>
                 <Typography variant="caption" color="grey.500" sx={{ display: 'block', mb: 2 }}>
-                  드래그하여 캔버스에 놓으세요
+                  드래그하여 캔버스에 놓으세요 ({allNodesWithRegistry.length}개 노드)
                 </Typography>
-                {NODE_CATEGORIES.map((category) => (
+                {registryCategories.map((category) => (
                   <Accordion
-                    key={category.title}
+                    key={category.id}
                     defaultExpanded={category.defaultExpanded}
                     sx={{ background: 'transparent', boxShadow: 'none', '&:before': { display: 'none' }, mb: 1 }}
                   >
