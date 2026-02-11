@@ -16,7 +16,7 @@ yarn-error.log*
 # Rust / Cargo
 # ========================================
 target/
-Cargo.lock
+# Note: Cargo.lock is INCLUDED for reproducible builds
 **/*.rs.bk
 *.pdb
 
