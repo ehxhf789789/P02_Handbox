@@ -39,7 +39,7 @@
         "icons/icon.ico"
       ],
       "identifier": "com.handbox.app",
-      "longDescription": "Handbox - AI 기반 워크플로우 자동화 플랫폼. 드래그 앤 드롭으로 복잡한 AI 워크플로우를 쉽게 설계하고 실행하세요.",
+      "longDescription": "Handbox - 샌드박스형 AI 시각화 및 에이전트 설계 플랫폼. AWS, GCP, Azure 등 다양한 클라우드 CLI와 개별 API를 통합하여 AI 워크플로우를 시각적으로 설계하고 실행합니다.",
       "macOS": {
         "entitlements": null,
         "exceptionDomain": "",
@@ -48,7 +48,7 @@
         "signingIdentity": null
       },
       "resources": [],
-      "shortDescription": "Handbox - AI Workflow Platform",
+      "shortDescription": "Handbox - Sandbox AI Agent Designer",
       "targets": "all",
       "windows": {
         "certificateThumbprint": null,

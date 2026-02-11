@@ -1,7 +1,7 @@
 [package]
 name = "handbox"
 version = "1.0.0"
-description = "Handbox - AI 기반 워크플로우 자동화 플랫폼"
+description = "Handbox - 샌드박스형 AI 시각화 및 에이전트 설계 플랫폼"
 authors = ["Handbox Team"]
 license = "MIT"
 edition = "2021"

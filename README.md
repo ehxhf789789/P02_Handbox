@@ -1,19 +1,19 @@
 <p align="center">
-  <img src="docs/images/logo.png" alt="Handbox Logo" width="120"/>
+  <img src="Handbox/public/images/logo.png" alt="Handbox Logo" width="120"/>
 </p>
 
 <h1 align="center">Handbox</h1>
 
 <p align="center">
-  <strong>AI 기반 워크플로우 자동화 플랫폼</strong><br>
-  드래그 앤 드롭으로 복잡한 AI 워크플로우를 쉽게 설계하고 실행하세요
+  <strong>Sandbox AI Agent Designer</strong><br>
+  다양한 클라우드 CLI와 API를 통합하는 시각적 AI 에이전트 설계 플랫폼
 </p>
 
 <p align="center">
   <a href="#features">Features</a> •
   <a href="#quick-start">Quick Start</a> •
   <a href="#installation">Installation</a> •
-  <a href="#documentation">Documentation</a> •
+  <a href="#platforms">Platforms</a> •
   <a href="#contributing">Contributing</a>
 </p>
 
@@ -21,15 +21,19 @@
 
 ## Overview
 
-**Handbox**는 비개발자도 쉽게 사용할 수 있는 AI 워크플로우 자동화 데스크톱 애플리케이션입니다.
-노드 기반 비주얼 프로그래밍 인터페이스를 통해 복잡한 AI 파이프라인을 직관적으로 설계하고 실행할 수 있습니다.
+**Handbox**는 다양한 AI 플랫폼과 클라우드 서비스를 통합하여 워크플로우를 시각적으로 설계하고 실행할 수 있는 **샌드박스형 AI 에이전트 설계 플랫폼**입니다.
+
+AWS, GCP, Azure 등의 클라우드 CLI뿐만 아니라 OpenAI, Anthropic 등 개별 API를 직접 입력하여 자유롭게 AI 파이프라인을 구축할 수 있습니다.
 
 ### Why Handbox?
 
-- **No-Code AI 워크플로우**: 코딩 없이 드래그 앤 드롭으로 AI 파이프라인 구축
-- **멀티 AI 프로바이더 지원**: AWS Bedrock, OpenAI, Anthropic 등 다양한 AI 서비스 통합
-- **로컬 우선**: 데스크톱 앱으로 데이터 프라이버시 보장
-- **확장 가능**: 커스텀 노드 및 플러그인 지원
+| Feature | Description |
+|---------|-------------|
+| **Sandbox Environment** | 안전한 샌드박스 환경에서 AI 에이전트를 설계하고 테스트 |
+| **Multi-Platform CLI** | AWS, GCP, Azure 등 다양한 클라우드 CLI 통합 |
+| **Custom API Support** | OpenAI, Anthropic, 커스텀 API 직접 연동 |
+| **Visual Designer** | 드래그 앤 드롭으로 복잡한 AI 워크플로우 설계 |
+| **Local-First** | 데스크톱 앱으로 데이터 프라이버시 보장 |
 
 ---
 
@@ -37,31 +41,52 @@
 
 ### Core Features
 
-| Feature | Description |
-|---------|-------------|
-| **Visual Workflow Editor** | ReactFlow 기반 노드 에디터로 워크플로우 시각적 설계 |
-| **다양한 노드 유형** | 입력/출력, AI 에이전트, 데이터 처리, API 연동 등 50+ 노드 제공 |
-| **실시간 실행** | 워크플로우 실행 상태 실시간 모니터링 |
-| **템플릿 시스템** | 사전 정의된 워크플로우 템플릿으로 빠른 시작 |
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        HANDBOX                                   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐ │
+│   │  Input   │───▶│  Agent   │───▶│ Process  │───▶│  Output  │ │
+│   │  Node    │    │  Node    │    │  Node    │    │  Node    │ │
+│   └──────────┘    └──────────┘    └──────────┘    └──────────┘ │
+│                                                                  │
+│   [AWS CLI] [GCP CLI] [Azure CLI] [OpenAI] [Anthropic] [Custom] │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-### AI Integration
+- **Visual Workflow Editor**: ReactFlow 기반 노드 에디터
+- **50+ Built-in Nodes**: 입력/출력, AI 에이전트, 데이터 처리, API 연동
+- **Real-time Execution**: 워크플로우 실행 상태 실시간 모니터링
+- **Template System**: 사전 정의 템플릿으로 빠른 시작
 
-- **AWS Bedrock**: Claude, Titan 등 AWS 관리형 AI 모델
-- **OpenAI API**: GPT-4, GPT-3.5 등 OpenAI 모델
-- **Anthropic API**: Claude 시리즈 직접 연동
-- **로컬 LLM**: Ollama 연동 지원 (예정)
+### Supported Platforms & APIs
 
-### Document Processing
+#### Cloud Platforms (CLI Integration)
+| Platform | Status | Features |
+|----------|--------|----------|
+| **AWS** | Supported | Bedrock, S3, Lambda, Comprehend, Translate |
+| **GCP** | Planned | Vertex AI, Cloud Functions, BigQuery |
+| **Azure** | Planned | OpenAI Service, Cognitive Services |
 
-- **PDF 처리**: 텍스트 추출, 분석, 생성
-- **Word/Excel**: 문서 파싱 및 생성
-- **HWP 지원**: 한글 문서 처리 (한국 환경 특화)
+#### AI APIs (Direct Integration)
+| Provider | Models |
+|----------|--------|
+| **AWS Bedrock** | Claude 3.5, Titan, Llama 2 |
+| **OpenAI** | GPT-4o, GPT-4 Turbo, GPT-3.5 |
+| **Anthropic** | Claude 3.5 Sonnet, Claude 3 Opus/Haiku |
+| **Custom API** | Any REST/GraphQL API |
 
-### External API Integration
+#### Document Processing
+- **PDF**: 텍스트 추출, 분석, 생성
+- **Office**: Word, Excel, PowerPoint
+- **HWP**: 한글 문서 (한국 특화)
 
-- **KIPRIS**: 한국 특허정보 조회
-- **NTIS**: 국가과학기술정보서비스 연동
-- **ScienceON**: KISTI 학술정보 검색
+#### External Services
+- **KIPRIS**: 한국 특허정보
+- **NTIS**: 국가과학기술정보
+- **ScienceON**: KISTI 학술정보
 
 ---
 
@@ -77,33 +102,24 @@
 | Node.js | v18+ | v20+ |
 | Rust | 1.70+ | 1.80+ |
 
-### One-Line Install (Windows PowerShell)
-
-```powershell
-# Clone and setup
-git clone https://github.com/ehxhf789789/P02_Handbox.git
-cd P02_Handbox
-.\setup_all.ps1
-```
-
-### Manual Installation
+### Installation
 
 ```bash
-# 1. Clone repository
+# 1. Clone
 git clone https://github.com/ehxhf789789/P02_Handbox.git
 cd P02_Handbox
 
-# 2. Install frontend dependencies
+# 2. Install dependencies
 cd Handbox
 npm install
 
-# 3. Build Rust backend
-cd src-tauri
-cargo build
-
-# 4. Run development server
-cd ..
+# 3. Run development server
 npm run tauri dev
+```
+
+**Windows PowerShell (One-liner):**
+```powershell
+git clone https://github.com/ehxhf789789/P02_Handbox.git; cd P02_Handbox; .\setup_all.ps1
 ```
 
 ---
@@ -112,53 +128,43 @@ npm run tauri dev
 
 ### Prerequisites
 
-#### 1. Rust & Cargo
-```powershell
-# Windows (winget)
-winget install Rustlang.Rustup
-
-# macOS/Linux
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-#### 2. Node.js & npm
-```powershell
-# Windows (winget)
-winget install OpenJS.NodeJS.LTS
-
-# macOS (Homebrew)
-brew install node
-```
-
-#### 3. Visual Studio Build Tools (Windows only)
-```powershell
-winget install Microsoft.VisualStudio.2022.BuildTools
-```
-
-#### 4. Tauri CLI
 ```bash
+# 1. Rust
+winget install Rustlang.Rustup      # Windows
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh  # macOS/Linux
+
+# 2. Node.js
+winget install OpenJS.NodeJS.LTS    # Windows
+brew install node                    # macOS
+
+# 3. Build Tools (Windows only)
+winget install Microsoft.VisualStudio.2022.BuildTools
+
+# 4. Tauri CLI
 cargo install tauri-cli
 ```
 
 ### Environment Setup
 
-1. Copy environment template:
 ```bash
 cp .env.example .env
 ```
 
-2. Configure your settings in `.env`:
+Edit `.env`:
 ```env
-# AWS Credentials (Optional - for AWS Bedrock)
-AWS_ACCESS_KEY_ID=your_access_key
-AWS_SECRET_ACCESS_KEY=your_secret_key
-AWS_DEFAULT_REGION=us-east-1
+# Cloud CLI (Optional - install separately)
+# aws configure
+# gcloud auth login
+# az login
 
-# OpenAI API (Optional)
+# Direct API Keys (Optional)
 OPENAI_API_KEY=your_openai_key
-
-# Anthropic API (Optional)
 ANTHROPIC_API_KEY=your_anthropic_key
+
+# AWS Bedrock (Optional)
+AWS_ACCESS_KEY_ID=your_key
+AWS_SECRET_ACCESS_KEY=your_secret
+AWS_DEFAULT_REGION=us-east-1
 ```
 
 ---
@@ -167,41 +173,27 @@ ANTHROPIC_API_KEY=your_anthropic_key
 
 ### Running the Application
 
-#### Development Mode (Hot Reload)
 ```bash
-cd Handbox
-npm run tauri dev
-```
+# Development (Hot Reload)
+cd Handbox && npm run tauri dev
 
-#### Production Build
-```bash
-cd Handbox
-npm run tauri build
+# Production Build
+cd Handbox && npm run tauri build
 ```
-
-Build outputs:
-- Windows: `src-tauri/target/release/handbox.exe`
-- macOS: `src-tauri/target/release/bundle/macos/Handbox.app`
-- Linux: `src-tauri/target/release/bundle/appimage/handbox.AppImage`
 
 ### First Launch
 
-1. **시작하기**: 앱 실행 후 AI 프로바이더 선택 (AWS/OpenAI/Anthropic 또는 나중에 설정)
-2. **워크플로우 생성**: 좌측 노드 팔레트에서 노드를 드래그하여 캔버스에 배치
-3. **연결**: 노드 간 연결선을 그려 데이터 흐름 정의
-4. **실행**: 상단 실행 버튼 클릭하여 워크플로우 실행
+1. **Provider Setup**: 사용할 AI 프로바이더 선택 (또는 나중에 설정)
+2. **Create Workflow**: 좌측 노드 팔레트에서 노드 드래그
+3. **Connect Nodes**: 노드 간 연결선으로 데이터 흐름 정의
+4. **Execute**: 상단 실행 버튼으로 워크플로우 실행
 
-### Workflow Templates
+### Adding Custom APIs
 
-Handbox는 다양한 사전 정의 템플릿을 제공합니다:
-
-| Template | Description |
-|----------|-------------|
-| Text Generation | 기본 텍스트 생성 워크플로우 |
-| Document Summary | 문서 요약 파이프라인 |
-| RAG Workflow | 검색 증강 생성 파이프라인 |
-| Data Extraction | 구조화 데이터 추출 |
-| Multi-language Translation | 다국어 번역 워크플로우 |
+1. **Settings** → **External API Settings**
+2. **Add API** 클릭
+3. API 이름, Endpoint, 인증 방식 입력
+4. 저장 후 노드 팔레트에서 사용
 
 ---
 
@@ -209,65 +201,31 @@ Handbox는 다양한 사전 정의 템플릿을 제공합니다:
 
 ```
 P02_Handbox/
-├── Handbox/                    # Tauri Desktop Application
-│   ├── src/                    # React Frontend
-│   │   ├── App.tsx            # Main Application Component
-│   │   ├── components/        # UI Components
-│   │   │   ├── WorkflowEditor/    # Node Editor
-│   │   │   ├── NodePalette/       # Node Library Panel
-│   │   │   ├── PropertyPanel/     # Node Properties
-│   │   │   └── MainLayout/        # Main UI Layout
-│   │   ├── nodes/             # Custom ReactFlow Nodes
-│   │   ├── stores/            # Zustand State Management
-│   │   │   ├── appStore.ts        # App-level State
-│   │   │   └── workflowStore.ts   # Workflow State
-│   │   ├── data/              # Templates & Configurations
-│   │   │   ├── nodeTemplates.ts   # Node Definitions
-│   │   │   └── workflows/         # Workflow Templates
-│   │   └── examples/          # Sample Workflows
-│   ├── src-tauri/             # Rust Backend
+├── Handbox/                    # Tauri Desktop App
+│   ├── src/                    # React Frontend (TypeScript)
+│   │   ├── components/         # UI Components
+│   │   ├── nodes/              # Custom ReactFlow Nodes
+│   │   ├── stores/             # Zustand State
+│   │   └── data/               # Templates
+│   ├── src-tauri/              # Rust Backend
 │   │   ├── src/
-│   │   │   ├── main.rs        # Application Entry
-│   │   │   ├── commands/      # Tauri Commands
-│   │   │   │   ├── aws_service.rs     # AWS Integration
-│   │   │   │   ├── file_system.rs     # File Operations
-│   │   │   │   ├── workflow.rs        # Workflow Execution
-│   │   │   │   └── knowledge_base.rs  # KB Operations
-│   │   │   ├── aws/           # AWS SDK Integration
-│   │   │   └── agents/        # Agent Logic
-│   │   ├── Cargo.toml         # Rust Dependencies
-│   │   └── tauri.conf.json    # Tauri Configuration
-│   ├── package.json           # Node.js Dependencies
-│   └── vite.config.ts         # Vite Configuration
-├── aws_agent/                  # Python Backend Agent
-│   ├── api/                   # FastAPI Server
-│   ├── agents/                # AI Agent Logic
-│   ├── preprocessing/         # Data Preprocessing
-│   └── vectorstore/           # Vector Database
-├── requirements.txt           # Python Dependencies
-├── .env.example              # Environment Template
-└── README.md                 # This File
+│   │   │   ├── commands/       # Tauri Commands
+│   │   │   ├── aws/            # AWS SDK
+│   │   │   └── agents/         # Agent Logic
+│   │   └── icons/              # App Icons
+│   └── public/
+│       └── images/             # Theme Logos
+│           ├── logo.png        # Default
+│           ├── logo-dark.png   # Dark Mode (white)
+│           └── logo-light.png  # Light Mode (black)
+├── aws_agent/                  # Python Backend (Optional)
+├── icon/                       # Source Icons
+│   ├── white_logo.png          # Dark mode
+│   ├── black_logo.png          # Light mode
+│   └── window_logo.png         # Taskbar/App icon
+├── requirements.txt            # Python deps
+└── .env.example               # Environment template
 ```
-
----
-
-## Configuration
-
-### AI Provider Settings
-
-앱 내 설정에서 AI 프로바이더를 구성할 수 있습니다:
-
-1. **Settings** → **AI Settings** 메뉴 열기
-2. 사용할 프로바이더 선택 및 API 키 입력
-3. 모델 및 파라미터 설정
-
-### Supported Models
-
-| Provider | Models |
-|----------|--------|
-| AWS Bedrock | Claude 3.5 Sonnet, Claude 3 Haiku, Titan |
-| OpenAI | GPT-4o, GPT-4 Turbo, GPT-3.5 Turbo |
-| Anthropic | Claude 3.5 Sonnet, Claude 3 Opus/Haiku |
 
 ---
 
@@ -278,113 +236,65 @@ P02_Handbox/
 | Layer | Technology |
 |-------|------------|
 | **Frontend** | React 18, TypeScript, Material-UI, ReactFlow, Zustand |
-| **Desktop Runtime** | Tauri (Rust) |
-| **Backend Services** | Rust (Native), Python FastAPI (Optional) |
-| **AI Integration** | AWS SDK for Rust, OpenAI API, Anthropic API |
-| **Build Tools** | Vite, Cargo |
+| **Desktop** | Tauri (Rust) |
+| **Backend** | Rust + Python FastAPI (Optional) |
+| **AI SDKs** | AWS SDK, OpenAI, Anthropic |
 
-### Development Commands
+### Commands
 
 ```bash
-# Frontend only (browser)
-npm run dev
+npm run dev           # Frontend only
+npm run tauri dev     # Full app
+npm run tauri build   # Production build
+npm run tauri icon <path>  # Generate icons
 
-# Full Tauri app (dev mode)
-npm run tauri dev
-
-# Type checking
-npm run build
-
-# Rust linting
-cd src-tauri && cargo clippy
-
-# Run tests
-cargo test
+cd src-tauri
+cargo build           # Build Rust
+cargo clippy          # Lint
+cargo test            # Test
 ```
-
-### Creating Custom Nodes
-
-1. `src/nodes/` 디렉토리에 새 노드 컴포넌트 생성
-2. `src/data/nodeTemplates.ts`에 노드 정의 추가
-3. 필요시 `src-tauri/src/commands/`에 백엔드 명령 추가
-
----
-
-## Troubleshooting
-
-### Common Issues
-
-#### Rust 컴파일 오류
-```bash
-# Update Rust
-rustup update
-
-# Clean build
-cd src-tauri && cargo clean && cargo build
-```
-
-#### npm 의존성 오류
-```bash
-rm -rf node_modules package-lock.json
-npm install
-```
-
-#### Tauri CLI 오류
-```bash
-cargo install tauri-cli --force
-```
-
-#### WebView2 오류 (Windows)
-Windows에서 WebView2 런타임이 필요합니다. [Microsoft 공식 페이지](https://developer.microsoft.com/en-us/microsoft-edge/webview2/)에서 다운로드하세요.
 
 ---
 
 ## Roadmap
 
-### v1.1 (Coming Soon)
-- [ ] Ollama 로컬 LLM 지원
-- [ ] 워크플로우 버전 관리
-- [ ] 협업 기능 (Cloud Sync)
+### v1.1
+- [ ] GCP CLI Integration
+- [ ] Azure CLI Integration
+- [ ] Ollama Local LLM
 
 ### v1.2
-- [ ] 플러그인 마켓플레이스
-- [ ] 자동화 스케줄러
-- [ ] REST API 노출
+- [ ] Plugin Marketplace
+- [ ] Workflow Scheduler
+- [ ] REST API Export
 
 ### v2.0
-- [ ] 멀티 에이전트 오케스트레이션
-- [ ] 실시간 협업 편집
-- [ ] 엔터프라이즈 기능
+- [ ] Multi-Agent Orchestration
+- [ ] Real-time Collaboration
+- [ ] Enterprise Features
 
 ---
 
 ## Contributing
 
-기여를 환영합니다! 자세한 내용은 [CONTRIBUTING.md](CONTRIBUTING.md)를 참조하세요.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
 
-### Development Setup
-
-1. Fork the repository
-2. Create feature branch: `git checkout -b feature/amazing-feature`
-3. Commit changes: `git commit -m 'Add amazing feature'`
-4. Push to branch: `git push origin feature/amazing-feature`
-5. Open Pull Request
+```bash
+# Quick setup for contributors
+git clone https://github.com/ehxhf789789/P02_Handbox.git
+cd P02_Handbox/Handbox
+npm install
+npm run tauri dev
+```
 
 ---
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-## Support
-
-- **Issues**: [GitHub Issues](https://github.com/ehxhf789789/P02_Handbox/issues)
-- **Email**: support@handbox.app
+MIT License - see [LICENSE](LICENSE)
 
 ---
 
 <p align="center">
-  Made with ❤️ by the Handbox Team
+  <strong>Handbox</strong> - Design AI Workflows, Your Way
 </p>
