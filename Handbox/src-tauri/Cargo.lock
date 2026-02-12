@@ -218,42 +218,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
-name = "aws-agent-studio"
-version = "1.0.0"
-dependencies = [
- "anyhow",
- "aws-config",
- "aws-sdk-bedrockruntime",
- "aws-sdk-comprehend",
- "aws-sdk-opensearchserverless",
- "aws-sdk-s3",
- "aws-sdk-textract",
- "aws-sdk-translate",
- "aws-smithy-runtime",
- "calamine",
- "chrono",
- "csv",
- "docx-rs",
- "hwpers",
- "hyper 0.14.32",
- "hyper-tls",
- "lazy_static",
- "pdf-extract",
- "ppt-rs",
- "printpdf",
- "quick-xml 0.37.5",
- "reqwest",
- "rust_xlsxwriter",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "thiserror 1.0.69",
- "tokio",
- "uuid",
-]
-
-[[package]]
 name = "aws-config"
 version = "1.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2423,6 +2387,42 @@ dependencies = [
  "cfg-if",
  "crunchy",
  "zerocopy",
+]
+
+[[package]]
+name = "handbox"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "aws-config",
+ "aws-sdk-bedrockruntime",
+ "aws-sdk-comprehend",
+ "aws-sdk-opensearchserverless",
+ "aws-sdk-s3",
+ "aws-sdk-textract",
+ "aws-sdk-translate",
+ "aws-smithy-runtime",
+ "calamine",
+ "chrono",
+ "csv",
+ "docx-rs",
+ "hwpers",
+ "hyper 0.14.32",
+ "hyper-tls",
+ "lazy_static",
+ "pdf-extract",
+ "ppt-rs",
+ "printpdf",
+ "quick-xml 0.37.5",
+ "reqwest",
+ "rust_xlsxwriter",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "thiserror 1.0.69",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
