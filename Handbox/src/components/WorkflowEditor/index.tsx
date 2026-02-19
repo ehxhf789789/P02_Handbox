@@ -101,31 +101,14 @@ const GroupNode = memo(function GroupNode({ data }: { data: { label: string; col
   )
 })
 
-// 노드 타입 정의 (컴포넌트 외부에서 정의)
-const nodeTypes: Record<string, any> = {
-  'input': InputNode,
-  'output': OutputNode,
-  'group': GroupNode,
-}
+// ===== nodeTypes는 컴포넌트 내부에서 useMemo로 생성 =====
+// React Flow는 nodeTypes가 stable해야 하므로 한 번만 생성
 
-// ===== NodeRegistry에서 모든 노드 타입 동적 등록 =====
-function registerAllNodeTypes() {
-  // NodeRegistry에 등록된 모든 노드를 가져와서 등록
-  const allDefinitions = NodeRegistry.getAll()
-  for (const def of allDefinitions) {
-    if (def.type !== 'input' && def.type !== 'output' && !nodeTypes[def.type]) {
-      nodeTypes[def.type] = GenericNode
-    }
-  }
-}
-
-// 초기 등록 시도 (앱 초기화 시점에 따라 비어있을 수 있음)
-registerAllNodeTypes()
-
-// 워크플로우 로드 시 미등록 노드 타입을 동적 등록
+// 워크플로우 로드 시 미등록 노드 타입을 동적 등록 (외부 호출용)
+const dynamicNodeTypes: Record<string, any> = {}
 export const ensureNodeTypeRegistered = (type: string) => {
-  if (!nodeTypes[type]) {
-    nodeTypes[type] = GenericNode
+  if (!dynamicNodeTypes[type]) {
+    dynamicNodeTypes[type] = GenericNode
   }
 }
 
@@ -168,6 +151,29 @@ const DragIndicator = memo(function DragIndicator() {
 const WorkflowEditorInner = memo(function WorkflowEditorInner() {
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const reactFlowInstance = useRef<ReactFlowInstance | null>(null)
+
+  // ===== nodeTypes를 useMemo로 생성 (컴포넌트 렌더링 시점에 NodeRegistry가 이미 채워져 있음) =====
+  const nodeTypes = useMemo(() => {
+    const types: Record<string, any> = {
+      'input': InputNode,
+      'output': OutputNode,
+      'group': GroupNode,
+    }
+
+    // NodeRegistry에서 모든 노드 타입 가져오기
+    const allDefinitions = NodeRegistry.getAll()
+    for (const def of allDefinitions) {
+      if (def.type !== 'input' && def.type !== 'output' && !types[def.type]) {
+        types[def.type] = GenericNode
+      }
+    }
+
+    // dynamicNodeTypes도 병합 (외부에서 추가된 타입)
+    Object.assign(types, dynamicNodeTypes)
+
+    console.log(`[WorkflowEditor] nodeTypes 생성 완료: ${Object.keys(types).length}개 타입`)
+    return types
+  }, []) // 빈 dependency - 한 번만 생성 (React Flow는 stable nodeTypes 필요)
 
   // Shallow 선택자로 필요한 상태만 구독하여 불필요한 리렌더링 방지
   const {
@@ -250,21 +256,14 @@ const WorkflowEditorInner = memo(function WorkflowEditorInner() {
 
   // 워크플로우의 모든 노드 타입이 등록되어 있는지 확인 (동적 등록)
   useEffect(() => {
-    // NodeRegistry에서 모든 노드 타입 재등록 (초기화 후 추가된 노드 포함)
-    registerAllNodeTypes()
-
-    let needsUpdate = false
+    // 새 노드가 추가되면 dynamicNodeTypes에 등록 (다음 렌더에 반영)
     for (const node of nodes) {
-      if (node.type && !nodeTypes[node.type]) {
-        nodeTypes[node.type] = GenericNode
-        needsUpdate = true
+      if (node.type && !nodeTypes[node.type] && !dynamicNodeTypes[node.type]) {
+        dynamicNodeTypes[node.type] = GenericNode
         console.log(`[WorkflowEditor] 노드 타입 동적 등록: ${node.type}`)
       }
     }
-    if (needsUpdate) {
-      console.log('[WorkflowEditor] 미등록 노드 타입 동적 등록 완료')
-    }
-  }, [nodes])
+  }, [nodes, nodeTypes])
 
   // 마우스 이동 처리
   useEffect(() => {
