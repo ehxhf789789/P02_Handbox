@@ -31,6 +31,9 @@ anyhow = "1.0"
 thiserror = "1.0"
 lazy_static = "1.4"
 
+# Credential Vault (OS 키체인 기반 보안 저장소)
+keyring = "2"
+
 # HTTP 클라이언트 (외부 API 호출용)
 reqwest = { version = "0.11", features = ["json", "native-tls"] }
 
@@ -44,6 +47,9 @@ ppt-rs = "0.1"                                         # PowerPoint 생성
 hwpers = "0.3"                                         # HWP 한글 문서 생성
 csv = "1.3"                                            # CSV 처리
 quick-xml = "0.37"                                     # XML 처리 개선
+
+# 로컬 저장소 (Phase 3)
+rusqlite = { version = "0.32", features = ["bundled"] }  # SQLite 임베디드
 
 # AWS SDK HTTP 클라이언트 - native-tls 사용 (Windows 시스템 인증서)
 aws-smithy-runtime = { version = "1.7", features = ["client", "connector-hyper-0-14-x"] }

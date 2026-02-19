@@ -1,3 +1,13 @@
+/**
+ * Provider Setup — Universal Sandbox 시작 화면
+ *
+ * 다양한 프로바이더 연결 지원:
+ * - AWS (Bedrock, S3)
+ * - OpenAI, Anthropic
+ * - Azure, GCP
+ * - Ollama (로컬 LLM)
+ */
+
 import { useState, useEffect } from 'react'
 import {
   Box,
@@ -6,22 +16,26 @@ import {
   Button,
   Typography,
   MenuItem,
-  Link,
-  Divider,
   Alert,
   CircularProgress,
-  FormControlLabel,
-  Checkbox,
-  Tabs,
-  Tab,
+  InputAdornment,
+  IconButton,
   Grid,
+  Chip,
 } from '@mui/material'
-import CloudIcon from '@mui/icons-material/Cloud'
 import SecurityIcon from '@mui/icons-material/Security'
 import HubIcon from '@mui/icons-material/Hub'
+import VisibilityIcon from '@mui/icons-material/Visibility'
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import KeyIcon from '@mui/icons-material/Key'
-import RocketLaunchIcon from '@mui/icons-material/RocketLaunch'
-import PsychologyIcon from '@mui/icons-material/Psychology'
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import {
+  useCredentialStore,
+  PROVIDER_NAMES,
+  PROVIDER_FIELDS,
+  CredentialProvider,
+} from '../../stores/credentialStore'
 
 interface ProviderSetupProps {
   onLogin: (credentials: {
@@ -34,121 +48,156 @@ interface ProviderSetupProps {
   onSkip: () => void
 }
 
-const AWS_REGIONS = [
-  { value: 'ap-southeast-2', label: 'Asia Pacific (Sydney)' },
-  { value: 'us-east-1', label: 'US East (N. Virginia)' },
-  { value: 'us-west-2', label: 'US West (Oregon)' },
-  { value: 'eu-west-1', label: 'Europe (Ireland)' },
-  { value: 'ap-northeast-1', label: 'Asia Pacific (Tokyo)' },
-  { value: 'ap-northeast-2', label: 'Asia Pacific (Seoul)' },
-  { value: 'ap-southeast-1', label: 'Asia Pacific (Singapore)' },
-  { value: 'eu-central-1', label: 'Europe (Frankfurt)' },
+// 프로바이더 정보
+const PROVIDERS = [
+  {
+    id: 'aws' as CredentialProvider,
+    name: 'AWS',
+    description: 'Bedrock, S3, Lambda 등',
+    icon: '☁️',
+    color: '#ff9900',
+  },
+  {
+    id: 'openai' as CredentialProvider,
+    name: 'OpenAI',
+    description: 'GPT-4, GPT-3.5, DALL-E',
+    icon: '🤖',
+    color: '#10a37f',
+  },
+  {
+    id: 'anthropic' as CredentialProvider,
+    name: 'Anthropic',
+    description: 'Claude 3.5, Claude 3',
+    icon: '🧠',
+    color: '#d4a574',
+  },
+  {
+    id: 'azure' as CredentialProvider,
+    name: 'Azure',
+    description: 'Azure OpenAI, Cognitive',
+    icon: '🔷',
+    color: '#0078d4',
+  },
+  {
+    id: 'gcp' as CredentialProvider,
+    name: 'Google Cloud',
+    description: 'Vertex AI, Gemini',
+    icon: '🔴',
+    color: '#4285f4',
+  },
 ]
 
-// 간단한 암호화/복호화
-const encodeCredentials = (data: string): string => {
-  return btoa(encodeURIComponent(data))
-}
+const AWS_REGIONS = [
+  { value: 'ap-northeast-2', label: '서울 (ap-northeast-2)' },
+  { value: 'us-east-1', label: '버지니아 (us-east-1)' },
+  { value: 'us-west-2', label: '오레곤 (us-west-2)' },
+  { value: 'ap-northeast-1', label: '도쿄 (ap-northeast-1)' },
+  { value: 'eu-west-1', label: '아일랜드 (eu-west-1)' },
+]
 
-const decodeCredentials = (data: string): string => {
-  try {
-    return decodeURIComponent(atob(data))
-  } catch {
-    return ''
-  }
-}
-
-// 저장된 자격 증명 불러오기
-export const loadSavedCredentials = (): {
-  accessKeyId?: string
-  secretAccessKey?: string
-  region?: string
-  useAWS: boolean
-} | null => {
+// 레거시 호환
+export const loadSavedCredentials = () => {
   try {
     const saved = localStorage.getItem('handbox-credentials')
-    if (saved) {
-      const decoded = decodeCredentials(saved)
-      const credentials = JSON.parse(decoded)
-      return credentials
-    }
-  } catch (error) {
-    console.error('Failed to load saved credentials:', error)
-  }
+    if (saved) return JSON.parse(decodeURIComponent(atob(saved)))
+  } catch { /* ignore */ }
   return null
 }
 
-// 자격 증명 저장하기
-export const saveCredentials = (credentials: {
-  accessKeyId?: string
-  secretAccessKey?: string
-  region?: string
-  useAWS: boolean
-}) => {
+export const saveCredentials = (credentials: any) => {
   try {
-    const encoded = encodeCredentials(JSON.stringify(credentials))
-    localStorage.setItem('handbox-credentials', encoded)
-  } catch (error) {
-    console.error('Failed to save credentials:', error)
-  }
+    localStorage.setItem('handbox-credentials', btoa(encodeURIComponent(JSON.stringify(credentials))))
+  } catch { /* ignore */ }
 }
 
-// 저장된 자격 증명 삭제
 export const clearSavedCredentials = () => {
   localStorage.removeItem('handbox-credentials')
 }
 
-const AI_PROVIDERS = [
-  { id: 'openai', name: 'OpenAI', icon: '🤖', description: 'GPT-4o, GPT-4, GPT-3.5 Turbo' },
-  { id: 'anthropic', name: 'Anthropic', icon: '🧠', description: 'Claude 3.5, Claude 3 Opus/Sonnet/Haiku' },
-  { id: 'google', name: 'Google AI', icon: '✨', description: 'Gemini 1.5 Pro, Gemini 1.5 Flash' },
-  { id: 'azure', name: 'Azure OpenAI', icon: '☁️', description: 'Azure hosted OpenAI models' },
-  { id: 'ollama', name: 'Ollama', icon: '🦙', description: 'Local LLMs (Llama 3, Mistral, etc.)' },
-]
-
 export default function ProviderSetup({ onLogin, onSkip }: ProviderSetupProps) {
-  const [tabValue, setTabValue] = useState(0) // 0: Quick Start, 1: AWS Bedrock
-  const [accessKeyId, setAccessKeyId] = useState('')
-  const [secretAccessKey, setSecretAccessKey] = useState('')
-  const [region, setRegion] = useState('ap-northeast-2')
-  const [rememberMe, setRememberMe] = useState(true)
+  const [step, setStep] = useState<'select' | 'credentials'>('select')
+  const [selectedProvider, setSelectedProvider] = useState<CredentialProvider | null>(null)
+  const [credentialValues, setCredentialValues] = useState<Record<string, string>>({})
+  const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({})
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  // 저장된 자격 증명 불러오기
+  const { saveAWSCredential, saveCredential } = useCredentialStore()
+
+  // 저장된 자격증명 로드
   useEffect(() => {
     const saved = loadSavedCredentials()
-    if (saved && saved.useAWS && saved.accessKeyId) {
-      setAccessKeyId(saved.accessKeyId)
-      setSecretAccessKey(saved.secretAccessKey || '')
-      setRegion(saved.region || 'ap-northeast-2')
-      setRememberMe(true)
-      setTabValue(1) // AWS 탭으로 이동
+    if (saved?.accessKeyId) {
+      setSelectedProvider('aws')
+      setCredentialValues({
+        access_key_id: saved.accessKeyId,
+        secret_access_key: saved.secretAccessKey || '',
+        region: saved.region || 'ap-northeast-2',
+      })
     }
   }, [])
 
-  const handleAWSSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleProviderSelect = (provider: CredentialProvider) => {
+    setSelectedProvider(provider)
+    setCredentialValues({})
+    setShowPasswords({})
     setError('')
+    setStep('credentials')
+  }
 
-    if (!accessKeyId || !secretAccessKey) {
-      setError('AWS Access Key ID와 Secret Access Key를 입력하세요.')
+  const handleConnect = async () => {
+    if (!selectedProvider) return
+
+    const fields = PROVIDER_FIELDS[selectedProvider]
+    const requiredFields = fields.filter(f => f.required)
+    const missingFields = requiredFields.filter(f => !credentialValues[f.key]?.trim())
+
+    if (missingFields.length > 0) {
+      setError(`${missingFields.map(f => f.label).join(', ')}을(를) 입력하세요.`)
       return
     }
 
     setLoading(true)
+    setError('')
+
     try {
-      await onLogin({ accessKeyId, secretAccessKey, region, rememberMe, useAWS: true })
+      if (selectedProvider === 'aws') {
+        await saveAWSCredential(
+          credentialValues.access_key_id,
+          credentialValues.secret_access_key,
+          credentialValues.region || 'ap-northeast-2'
+        )
+        saveCredentials({
+          accessKeyId: credentialValues.access_key_id,
+          secretAccessKey: credentialValues.secret_access_key,
+          region: credentialValues.region || 'ap-northeast-2',
+          useAWS: true,
+        })
+        await onLogin({
+          accessKeyId: credentialValues.access_key_id,
+          secretAccessKey: credentialValues.secret_access_key,
+          region: credentialValues.region || 'ap-northeast-2',
+          rememberMe: true,
+          useAWS: true,
+        })
+      } else {
+        await saveCredential({
+          name: `${PROVIDER_NAMES[selectedProvider]} Credentials`,
+          type: selectedProvider === 'openai' || selectedProvider === 'anthropic' ? 'api-key' : 'access-key',
+          provider: selectedProvider,
+          values: credentialValues,
+        })
+        // 다른 프로바이더는 스킵 후 진입
+        onSkip()
+      }
     } catch (err) {
-      setError('AWS 연결 실패. 자격 증명을 확인하세요.')
+      setError('연결 실패. 자격 증명을 확인하세요.')
     } finally {
       setLoading(false)
     }
   }
 
-  const handleQuickStart = () => {
-    onSkip()
-  }
+  const providerInfo = PROVIDERS.find(p => p.id === selectedProvider)
 
   return (
     <Box
@@ -157,323 +206,331 @@ export default function ProviderSetup({ onLogin, onSkip }: ProviderSetupProps) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%)',
+        background: 'linear-gradient(180deg, #0a0f1a 0%, #1a1f2e 100%)',
         p: 2,
       }}
     >
       <Paper
-        elevation={24}
+        elevation={0}
         sx={{
-          p: 4,
-          maxWidth: 560,
+          p: 0,
+          maxWidth: 520,
           width: '100%',
           borderRadius: 4,
-          background: 'rgba(30, 41, 59, 0.95)',
-          backdropFilter: 'blur(20px)',
-          border: '1px solid rgba(16, 185, 129, 0.3)',
-          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 100px rgba(16, 185, 129, 0.1)',
+          background: 'transparent',
         }}
       >
-        {/* Header */}
+        {/* 헤더 */}
         <Box sx={{ textAlign: 'center', mb: 4 }}>
           <Box
             sx={{
-              width: 90,
-              height: 90,
-              borderRadius: 3,
+              width: 80,
+              height: 80,
+              borderRadius: '24px',
               background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               mx: 'auto',
               mb: 3,
-              boxShadow: '0 10px 40px rgba(16, 185, 129, 0.4)',
+              boxShadow: '0 20px 40px rgba(16, 185, 129, 0.3)',
             }}
           >
-            <HubIcon sx={{ fontSize: 45, color: 'white' }} />
+            <HubIcon sx={{ fontSize: 40, color: 'white' }} />
           </Box>
-          <Typography
-            variant="h4"
-            sx={{
-              fontWeight: 800,
-              background: 'linear-gradient(90deg, #fff 0%, #6ee7b7 100%)',
-              backgroundClip: 'text',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              mb: 1,
-            }}
-          >
+          <Typography variant="h4" sx={{ fontWeight: 700, color: 'white', mb: 1 }}>
             Handbox
           </Typography>
-          <Typography variant="body2" color="grey.400" sx={{ mt: 1 }}>
-            Universal AI Agent Workflow Platform
+          <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.5)' }}>
+            Universal AI Workflow Platform
           </Typography>
         </Box>
 
-        <Divider sx={{ mb: 3, borderColor: 'rgba(16, 185, 129, 0.2)' }} />
-
-        {/* Tabs */}
-        <Tabs
-          value={tabValue}
-          onChange={(_, v) => setTabValue(v)}
-          sx={{
-            mb: 3,
-            '& .MuiTab-root': { color: 'grey.500', flex: 1 },
-            '& .Mui-selected': { color: '#10b981' },
-            '& .MuiTabs-indicator': { backgroundColor: '#10b981' },
-          }}
-        >
-          <Tab
-            icon={<RocketLaunchIcon sx={{ fontSize: 18 }} />}
-            iconPosition="start"
-            label="Quick Start"
-          />
-          <Tab
-            icon={<CloudIcon sx={{ fontSize: 18 }} />}
-            iconPosition="start"
-            label="AWS Bedrock"
-          />
-        </Tabs>
-
-        {/* Quick Start Tab */}
-        {tabValue === 0 && (
-          <Box>
-            <Alert
-              severity="info"
-              sx={{
-                mb: 3,
-                bgcolor: 'rgba(16, 185, 129, 0.1)',
-                border: '1px solid rgba(16, 185, 129, 0.3)',
-                '& .MuiAlert-icon': { color: '#10b981' },
-              }}
-            >
-              AWS 없이 바로 시작하세요! AI 설정에서 원하는 AI 프로바이더의 API 키를 입력하면 됩니다.
-            </Alert>
-
-            <Typography
-              variant="subtitle2"
-              color="grey.300"
-              sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}
-            >
-              <PsychologyIcon fontSize="small" />
-              지원하는 AI 프로바이더
+        {/* 프로바이더 선택 화면 */}
+        {step === 'select' && (
+          <Paper
+            sx={{
+              p: 4,
+              borderRadius: 3,
+              background: 'rgba(30, 41, 59, 0.8)',
+              backdropFilter: 'blur(20px)',
+              border: '1px solid rgba(255,255,255,0.1)',
+            }}
+          >
+            <Typography variant="h6" sx={{ color: 'white', mb: 1, fontWeight: 600 }}>
+              시작하기
+            </Typography>
+            <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.5)', mb: 3 }}>
+              연결할 클라우드 또는 AI 프로바이더를 선택하세요
             </Typography>
 
+            {/* 프로바이더 그리드 */}
             <Grid container spacing={1.5} sx={{ mb: 3 }}>
-              {AI_PROVIDERS.map((provider) => (
+              {PROVIDERS.map((provider) => (
                 <Grid item xs={6} key={provider.id}>
                   <Paper
+                    onClick={() => handleProviderSelect(provider.id)}
                     sx={{
-                      p: 1.5,
+                      p: 2,
+                      cursor: 'pointer',
                       bgcolor: 'rgba(255,255,255,0.03)',
                       border: '1px solid rgba(255,255,255,0.1)',
                       borderRadius: 2,
-                      cursor: 'default',
+                      transition: 'all 0.2s',
                       '&:hover': {
-                        bgcolor: 'rgba(255,255,255,0.05)',
-                        borderColor: 'rgba(16, 185, 129, 0.3)',
+                        bgcolor: 'rgba(255,255,255,0.08)',
+                        borderColor: provider.color,
+                        transform: 'translateY(-2px)',
                       },
                     }}
                   >
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                      <Typography fontSize="1.2rem">{provider.icon}</Typography>
-                      <Typography variant="body2" color="white" fontWeight={600}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1 }}>
+                      <Typography fontSize="1.5rem">{provider.icon}</Typography>
+                      <Typography variant="body1" sx={{ color: 'white', fontWeight: 600 }}>
                         {provider.name}
                       </Typography>
                     </Box>
-                    <Typography variant="caption" color="grey.500">
+                    <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)' }}>
                       {provider.description}
                     </Typography>
                   </Paper>
                 </Grid>
               ))}
+
+              {/* Ollama (로컬) */}
+              <Grid item xs={6}>
+                <Paper
+                  onClick={onSkip}
+                  sx={{
+                    p: 2,
+                    cursor: 'pointer',
+                    bgcolor: 'rgba(255,255,255,0.03)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: 2,
+                    transition: 'all 0.2s',
+                    '&:hover': {
+                      bgcolor: 'rgba(255,255,255,0.08)',
+                      borderColor: '#a855f7',
+                      transform: 'translateY(-2px)',
+                    },
+                  }}
+                >
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1 }}>
+                    <Typography fontSize="1.5rem">🦙</Typography>
+                    <Box>
+                      <Typography variant="body1" sx={{ color: 'white', fontWeight: 600 }}>
+                        Ollama
+                      </Typography>
+                      <Chip
+                        label="로컬"
+                        size="small"
+                        sx={{
+                          height: 18,
+                          fontSize: '0.65rem',
+                          bgcolor: 'rgba(168, 85, 247, 0.2)',
+                          color: '#a855f7',
+                        }}
+                      />
+                    </Box>
+                  </Box>
+                  <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)' }}>
+                    무료 로컬 LLM
+                  </Typography>
+                </Paper>
+              </Grid>
+
+              {/* 나중에 설정 */}
+              <Grid item xs={6}>
+                <Paper
+                  onClick={onSkip}
+                  sx={{
+                    p: 2,
+                    cursor: 'pointer',
+                    bgcolor: 'rgba(255,255,255,0.02)',
+                    border: '1px dashed rgba(255,255,255,0.2)',
+                    borderRadius: 2,
+                    transition: 'all 0.2s',
+                    '&:hover': {
+                      bgcolor: 'rgba(255,255,255,0.05)',
+                    },
+                  }}
+                >
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1 }}>
+                    <ArrowForwardIcon sx={{ color: 'rgba(255,255,255,0.3)' }} />
+                    <Typography variant="body1" sx={{ color: 'rgba(255,255,255,0.5)', fontWeight: 600 }}>
+                      나중에
+                    </Typography>
+                  </Box>
+                  <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.4)' }}>
+                    설정에서 추가
+                  </Typography>
+                </Paper>
+              </Grid>
             </Grid>
 
-            <Button
-              fullWidth
-              variant="contained"
-              size="large"
-              onClick={handleQuickStart}
-              startIcon={<RocketLaunchIcon />}
-              sx={{
-                py: 1.5,
-                fontSize: '1rem',
-                fontWeight: 600,
-                borderRadius: 2,
-                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                boxShadow: '0 4px 15px rgba(16, 185, 129, 0.4)',
-                '&:hover': {
-                  background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
-                  boxShadow: '0 6px 20px rgba(16, 185, 129, 0.5)',
-                },
-              }}
-            >
-              바로 시작하기
-            </Button>
-
-            <Typography variant="caption" color="grey.500" sx={{ display: 'block', textAlign: 'center', mt: 2 }}>
-              시작 후 AI 설정 (
-              <KeyIcon sx={{ fontSize: 12, verticalAlign: 'middle' }} />) 에서 API 키를 입력하세요
-            </Typography>
-          </Box>
+            {/* 안내 */}
+            <Box sx={{ textAlign: 'center' }}>
+              <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.4)' }}>
+                여러 프로바이더를 동시에 사용할 수 있습니다
+              </Typography>
+            </Box>
+          </Paper>
         )}
 
-        {/* AWS Bedrock Tab */}
-        {tabValue === 1 && (
-          <Box>
-            <Alert
-              severity="info"
-              sx={{
-                mb: 3,
-                bgcolor: 'rgba(255, 153, 0, 0.1)',
-                border: '1px solid rgba(255, 153, 0, 0.3)',
-                '& .MuiAlert-icon': { color: '#ff9900' },
-              }}
-            >
-              AWS Bedrock을 사용하면 Claude, Llama, Titan 등 다양한 모델을 AWS 인프라에서 사용할 수 있습니다.
-            </Alert>
+        {/* 자격증명 입력 화면 */}
+        {step === 'credentials' && selectedProvider && (
+          <Paper
+            sx={{
+              p: 4,
+              borderRadius: 3,
+              background: 'rgba(30, 41, 59, 0.8)',
+              backdropFilter: 'blur(20px)',
+              border: '1px solid rgba(255,255,255,0.1)',
+            }}
+          >
+            {/* 뒤로가기 + 타이틀 */}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
+              <IconButton
+                onClick={() => setStep('select')}
+                sx={{ color: 'rgba(255,255,255,0.5)' }}
+              >
+                <ArrowBackIcon />
+              </IconButton>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                <Typography fontSize="1.5rem">{providerInfo?.icon}</Typography>
+                <Box>
+                  <Typography variant="h6" sx={{ color: 'white', fontWeight: 600 }}>
+                    {providerInfo?.name} 연결
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)' }}>
+                    {providerInfo?.description}
+                  </Typography>
+                </Box>
+              </Box>
+            </Box>
 
+            {/* 에러 */}
             {error && (
-              <Alert severity="error" sx={{ mb: 2, borderRadius: 2 }}>
+              <Alert severity="error" sx={{ mb: 3, borderRadius: 2 }} onClose={() => setError('')}>
                 {error}
               </Alert>
             )}
 
-            <form onSubmit={handleAWSSubmit}>
-              <TextField
-                fullWidth
-                label="AWS Access Key ID"
-                variant="outlined"
-                value={accessKeyId}
-                onChange={(e) => setAccessKeyId(e.target.value)}
-                sx={{
-                  mb: 2,
-                  '& .MuiOutlinedInput-root': {
-                    borderRadius: 2,
-                    '&:hover .MuiOutlinedInput-notchedOutline': {
-                      borderColor: '#ff9900',
+            {/* 프로바이더별 필드 */}
+            {PROVIDER_FIELDS[selectedProvider].map((field) => (
+              <Box key={field.key} sx={{ mb: 2 }}>
+                <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.7)', mb: 1, display: 'block' }}>
+                  {field.label} {field.required && <span style={{ color: '#ef4444' }}>*</span>}
+                </Typography>
+                <TextField
+                  fullWidth
+                  type={field.type === 'password' && !showPasswords[field.key] ? 'password' : 'text'}
+                  value={credentialValues[field.key] || ''}
+                  onChange={(e) => setCredentialValues({ ...credentialValues, [field.key]: e.target.value })}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <KeyIcon sx={{ color: 'rgba(255,255,255,0.3)', fontSize: 20 }} />
+                      </InputAdornment>
+                    ),
+                    endAdornment: field.type === 'password' && (
+                      <InputAdornment position="end">
+                        <IconButton
+                          onClick={() => setShowPasswords({ ...showPasswords, [field.key]: !showPasswords[field.key] })}
+                          edge="end"
+                          sx={{ color: 'rgba(255,255,255,0.5)' }}
+                        >
+                          {showPasswords[field.key] ? <VisibilityOffIcon /> : <VisibilityIcon />}
+                        </IconButton>
+                      </InputAdornment>
+                    ),
+                    sx: {
+                      color: 'white',
+                      bgcolor: 'rgba(0,0,0,0.2)',
+                      borderRadius: 2,
+                      '& fieldset': { borderColor: 'rgba(255,255,255,0.1)' },
+                      '&:hover fieldset': { borderColor: 'rgba(255,255,255,0.2)' },
+                      '&.Mui-focused fieldset': { borderColor: providerInfo?.color || '#10b981' },
                     },
-                  },
-                }}
-                placeholder="AKIA..."
-                InputProps={{
-                  sx: { color: 'white' },
-                }}
-              />
+                  }}
+                />
+              </Box>
+            ))}
 
-              <TextField
-                fullWidth
-                label="AWS Secret Access Key"
-                variant="outlined"
-                type="password"
-                value={secretAccessKey}
-                onChange={(e) => setSecretAccessKey(e.target.value)}
-                sx={{
-                  mb: 2,
-                  '& .MuiOutlinedInput-root': {
-                    borderRadius: 2,
-                    '&:hover .MuiOutlinedInput-notchedOutline': {
-                      borderColor: '#ff9900',
+            {/* AWS 리전 선택 */}
+            {selectedProvider === 'aws' && (
+              <Box sx={{ mb: 3 }}>
+                <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.7)', mb: 1, display: 'block' }}>
+                  Region
+                </Typography>
+                <TextField
+                  fullWidth
+                  select
+                  value={credentialValues.region || 'ap-northeast-2'}
+                  onChange={(e) => setCredentialValues({ ...credentialValues, region: e.target.value })}
+                  InputProps={{
+                    sx: {
+                      color: 'white',
+                      bgcolor: 'rgba(0,0,0,0.2)',
+                      borderRadius: 2,
+                      '& fieldset': { borderColor: 'rgba(255,255,255,0.1)' },
                     },
-                  },
-                }}
-                InputProps={{
-                  sx: { color: 'white' },
-                }}
-              />
+                  }}
+                  SelectProps={{
+                    MenuProps: { PaperProps: { sx: { bgcolor: '#1e293b' } } },
+                  }}
+                >
+                  {AWS_REGIONS.map((r) => (
+                    <MenuItem key={r.value} value={r.value} sx={{ color: 'white' }}>
+                      {r.label}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              </Box>
+            )}
 
-              <TextField
-                fullWidth
-                select
-                label="AWS Region"
-                value={region}
-                onChange={(e) => setRegion(e.target.value)}
-                sx={{
-                  mb: 2,
-                  '& .MuiOutlinedInput-root': {
-                    borderRadius: 2,
-                  },
-                }}
-              >
-                {AWS_REGIONS.map((option) => (
-                  <MenuItem key={option.value} value={option.value}>
-                    {option.label}
-                  </MenuItem>
-                ))}
-              </TextField>
+            {/* 연결 버튼 */}
+            <Button
+              fullWidth
+              variant="contained"
+              size="large"
+              onClick={handleConnect}
+              disabled={loading}
+              endIcon={loading ? <CircularProgress size={20} color="inherit" /> : <ArrowForwardIcon />}
+              sx={{
+                py: 1.5,
+                borderRadius: 2,
+                fontSize: '1rem',
+                fontWeight: 600,
+                background: `linear-gradient(135deg, ${providerInfo?.color || '#10b981'} 0%, ${providerInfo?.color || '#059669'}dd 100%)`,
+                boxShadow: `0 8px 24px ${providerInfo?.color || '#10b981'}40`,
+                '&:hover': {
+                  boxShadow: `0 12px 32px ${providerInfo?.color || '#10b981'}50`,
+                },
+                '&:disabled': {
+                  background: 'rgba(255,255,255,0.1)',
+                  color: 'rgba(255,255,255,0.3)',
+                },
+              }}
+            >
+              {loading ? '연결 중...' : '연결하기'}
+            </Button>
 
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={rememberMe}
-                    onChange={(e) => setRememberMe(e.target.checked)}
-                    sx={{
-                      color: 'grey.500',
-                      '&.Mui-checked': { color: '#ff9900' },
-                    }}
-                  />
-                }
-                label={
-                  <Typography variant="body2" color="grey.400">
-                    로그인 정보 저장
-                  </Typography>
-                }
-                sx={{ mb: 3 }}
-              />
-
-              <Button
-                fullWidth
-                variant="contained"
-                type="submit"
-                disabled={loading}
-                sx={{
-                  py: 1.5,
-                  fontSize: '1rem',
-                  fontWeight: 600,
-                  borderRadius: 2,
-                  background: 'linear-gradient(135deg, #ff9900 0%, #ff6600 100%)',
-                  boxShadow: '0 4px 15px rgba(255, 153, 0, 0.4)',
-                  '&:hover': {
-                    background: 'linear-gradient(135deg, #ff6600 0%, #cc5500 100%)',
-                    boxShadow: '0 6px 20px rgba(255, 153, 0, 0.5)',
-                  },
-                }}
-              >
-                {loading ? <CircularProgress size={24} color="inherit" /> : 'AWS Bedrock 연결'}
-              </Button>
-            </form>
-
-            <Divider sx={{ my: 3, borderColor: 'rgba(255, 153, 0, 0.2)' }} />
-
-            <Box sx={{ textAlign: 'center' }}>
-              <Typography variant="body2" color="grey.500" sx={{ mb: 1 }}>
-                AWS 계정이 없으신가요?
+            {/* 보안 안내 */}
+            <Box sx={{ mt: 3, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }}>
+              <SecurityIcon sx={{ fontSize: 14, color: 'rgba(255,255,255,0.3)' }} />
+              <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.3)' }}>
+                자격 증명은 OS 보안 저장소에 암호화 저장
               </Typography>
-              <Link
-                href="https://aws.amazon.com/console/"
-                target="_blank"
-                sx={{
-                  color: '#ff9900',
-                  textDecoration: 'none',
-                  fontWeight: 500,
-                  '&:hover': { color: '#ffb84d' },
-                }}
-              >
-                AWS 콘솔에서 계정 생성하기
-              </Link>
             </Box>
-          </Box>
+          </Paper>
         )}
 
-        <Divider sx={{ my: 3, borderColor: 'rgba(255,255,255,0.1)' }} />
-
-        <Box sx={{ textAlign: 'center' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }}>
-            <SecurityIcon sx={{ fontSize: 14, color: 'grey.600' }} />
-            <Typography variant="caption" color="grey.600">
-              모든 자격 증명은 로컬에 안전하게 저장됩니다
-            </Typography>
-          </Box>
+        {/* 하단 안내 */}
+        <Box sx={{ mt: 4, textAlign: 'center' }}>
+          <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.3)' }}>
+            MCP 서버로 더 많은 도구를 연결할 수 있습니다
+          </Typography>
         </Box>
       </Paper>
     </Box>

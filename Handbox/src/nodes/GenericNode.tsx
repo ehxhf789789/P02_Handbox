@@ -22,7 +22,6 @@ import ApiIcon from '@mui/icons-material/Api'
 import BarChartIcon from '@mui/icons-material/BarChart'
 import PowerOffIcon from '@mui/icons-material/PowerOff'
 import StopCircleIcon from '@mui/icons-material/StopCircle'
-import ScienceIcon from '@mui/icons-material/Science'
 import { useWorkflowStore, NodeExecutionStatus } from '../stores/workflowStore'
 
 interface GenericNodeData {
@@ -37,8 +36,6 @@ interface GenericNodeData {
 
 // 노드 타입에 따른 아이콘 매핑
 const getNodeIcon = (nodeType: string) => {
-  // KISTI ScienceON
-  if (nodeType.startsWith('kisti-')) return <ScienceIcon sx={{ fontSize: 18 }} />
   // 문서 파싱
   if (nodeType.startsWith('doc-')) return <DescriptionIcon sx={{ fontSize: 18 }} />
   // 문서 내보내기

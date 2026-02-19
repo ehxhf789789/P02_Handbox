@@ -35,8 +35,6 @@ export const NODE_GROUPS = {
   TEXT_INPUT: ['prompt-template', 'text-splitter', 'embedder', 'aws-translate', 'aws-comprehend'],
   // 텍스트 출력을 하는 노드들
   TEXT_OUTPUT: ['input', 'local-file', 'local-folder', 'doc-pdf-parser', 'doc-excel-parser', 'doc-csv-parser', 'doc-json-parser', 'doc-xml-parser', 'prompt-template', 'output'],
-  // KISTI ScienceON API 노드들
-  KISTI: ['kisti-articles', 'kisti-patents', 'kisti-reports', 'kisti-trends'],
   // LLM 모델들
   LLM_MODELS: ['model-claude-3-5-sonnet', 'model-claude-3-opus', 'model-claude-3-sonnet', 'model-claude-3-haiku', 'model-titan-text-premier', 'model-llama-3-1-405b', 'model-llama-3-1-70b', 'model-mistral-large'],
   // 벡터/임베딩 관련
@@ -563,128 +561,6 @@ export const NODE_GUIDES: Record<string, NodeGuide> = {
     tips: ['merge_strategy로 병합 방식을 선택할 수 있습니다.']
   },
 
-  // =========== KISTI ScienceON ===========
-  'kisti-articles': {
-    type: 'kisti-articles',
-    name: 'KISTI 논문',
-    description: 'KISTI ScienceON API를 통해 국내외 학술논문을 검색합니다.',
-    category: 'API 연동',
-    inputs: {
-      required: [],
-      optional: ['input', 'prompt-template'],
-      description: '검색어를 입력받습니다. 입력이 없으면 config의 query를 사용합니다.'
-    },
-    outputs: {
-      recommended: ['prompt-template', ...NODE_GROUPS.LLM_MODELS, 'viz-table-viewer'],
-      compatible: [...NODE_GROUPS.LLM_MODELS, ...NODE_GROUPS.VISUALIZATION, ...NODE_GROUPS.EXPORT, 'output', 'prompt-template'],
-      description: '검색된 논문 목록(제목, 저자, 학술지, 초록 등)을 JSON 형태로 출력합니다.'
-    },
-    examples: [
-      {
-        title: '건설기술 논문 검색',
-        description: '건설신기술 관련 논문 검색 후 LLM 분석',
-        nodes: ['input', 'kisti-articles', 'prompt-template', 'model-claude-3-5-sonnet', 'output']
-      },
-      {
-        title: '논문 검색 결과 내보내기',
-        description: '검색된 논문 목록을 Excel로 저장',
-        nodes: ['kisti-articles', 'export-excel', 'output']
-      }
-    ],
-    warnings: ['KISTI API 인증키가 필요합니다.', 'MAC 주소가 KISTI에 등록되어 있어야 합니다.'],
-    tips: [
-      'search_field를 BI(기본색인), TI(제목), AU(저자) 등으로 설정할 수 있습니다.',
-      'row_count로 반환 결과 수를 조절하세요 (기본 10건).',
-      'cur_page로 페이지를 지정할 수 있습니다.'
-    ]
-  },
-
-  'kisti-patents': {
-    type: 'kisti-patents',
-    name: 'KISTI 특허',
-    description: 'KISTI ScienceON API를 통해 국내외 특허 정보를 검색합니다.',
-    category: 'API 연동',
-    inputs: {
-      required: [],
-      optional: ['input', 'prompt-template'],
-      description: '검색어를 입력받습니다. 입력이 없으면 config의 query를 사용합니다.'
-    },
-    outputs: {
-      recommended: ['prompt-template', ...NODE_GROUPS.LLM_MODELS, 'viz-table-viewer'],
-      compatible: [...NODE_GROUPS.LLM_MODELS, ...NODE_GROUPS.VISUALIZATION, ...NODE_GROUPS.EXPORT, 'output', 'prompt-template'],
-      description: '검색된 특허 목록(제목, 출원인, 출원번호, 요약 등)을 JSON 형태로 출력합니다.'
-    },
-    examples: [
-      {
-        title: '특허 동향 분석',
-        description: '특정 기술 분야 특허 검색 후 분석',
-        nodes: ['input', 'kisti-patents', 'prompt-template', 'model-claude-3-5-sonnet', 'output']
-      }
-    ],
-    warnings: ['KISTI API 인증키가 필요합니다.', 'MAC 주소가 KISTI에 등록되어 있어야 합니다.'],
-    tips: [
-      'search_field를 TI(명칭), AB(요약), AP(출원인) 등으로 설정할 수 있습니다.',
-      '특허 분석에는 출원번호와 등록번호를 활용하세요.'
-    ]
-  },
-
-  'kisti-reports': {
-    type: 'kisti-reports',
-    name: 'KISTI 보고서',
-    description: 'KISTI ScienceON API를 통해 연구/기술 보고서를 검색합니다.',
-    category: 'API 연동',
-    inputs: {
-      required: [],
-      optional: ['input', 'prompt-template'],
-      description: '검색어를 입력받습니다. 입력이 없으면 config의 query를 사용합니다.'
-    },
-    outputs: {
-      recommended: ['prompt-template', ...NODE_GROUPS.LLM_MODELS, 'viz-table-viewer'],
-      compatible: [...NODE_GROUPS.LLM_MODELS, ...NODE_GROUPS.VISUALIZATION, ...NODE_GROUPS.EXPORT, 'output', 'prompt-template'],
-      description: '검색된 보고서 목록(제목, 저자, 기관, 초록 등)을 JSON 형태로 출력합니다.'
-    },
-    examples: [
-      {
-        title: '기술보고서 검색',
-        description: '특정 분야 연구보고서 검색',
-        nodes: ['input', 'kisti-reports', 'viz-table-viewer', 'output']
-      }
-    ],
-    warnings: ['KISTI API 인증키가 필요합니다.', 'MAC 주소가 KISTI에 등록되어 있어야 합니다.'],
-    tips: [
-      '국가 R&D 과제 보고서, KISTEP 보고서 등이 검색됩니다.',
-      'search_field를 활용하여 제목, 저자, 기관별 검색이 가능합니다.'
-    ]
-  },
-
-  'kisti-trends': {
-    type: 'kisti-trends',
-    name: 'KISTI 동향',
-    description: 'KISTI ScienceON API를 통해 과학기술 동향 정보를 검색합니다.',
-    category: 'API 연동',
-    inputs: {
-      required: [],
-      optional: ['input', 'prompt-template'],
-      description: '검색어를 입력받습니다. 입력이 없으면 config의 query를 사용합니다.'
-    },
-    outputs: {
-      recommended: ['prompt-template', ...NODE_GROUPS.LLM_MODELS, 'viz-table-viewer'],
-      compatible: [...NODE_GROUPS.LLM_MODELS, ...NODE_GROUPS.VISUALIZATION, ...NODE_GROUPS.EXPORT, 'output', 'prompt-template'],
-      description: '검색된 동향 정보(제목, 요약, 분야 등)를 JSON 형태로 출력합니다.'
-    },
-    examples: [
-      {
-        title: '기술동향 분석',
-        description: '최신 기술 동향 검색 및 분석',
-        nodes: ['input', 'kisti-trends', 'prompt-template', 'model-claude-3-5-sonnet', 'output']
-      }
-    ],
-    warnings: ['KISTI API 인증키가 필요합니다.', 'MAC 주소가 KISTI에 등록되어 있어야 합니다.'],
-    tips: [
-      '기술동향 리포트, 산업동향 등의 정보가 검색됩니다.',
-      '건설, 환경, 에너지 등 분야별 동향 파악에 유용합니다.'
-    ]
-  },
 }
 
 // 노드 타입으로 가이드 가져오기

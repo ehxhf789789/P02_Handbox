@@ -322,17 +322,6 @@ const NODE_DESCRIPTIONS: Record<string, { title: string; description: string; us
     ],
     tips: ['무료로 하루 1000건까지 호출 가능', '건설신기술은 "특허" 유형으로 검색']
   },
-  'api-scienceon': {
-    title: 'ScienceON (KISTI)',
-    description: 'KISTI 과학기술정보서비스입니다. 논문, 특허, 보고서, 동향 정보를 검색합니다.',
-    usage: [
-      '1단계: scienceon.kisti.re.kr 접속 → 회원가입',
-      '2단계: 마이페이지 → OpenAPI → API 키 발급',
-      '3단계: 발급된 API 키를 아래 입력란에 붙여넣기',
-      '4단계: 검색 범위(논문/특허/보고서) 선택 후 검색어 입력',
-    ],
-    tips: ['국내외 학술정보 통합 검색 가능', '건설/토목 관련 논문 검색에 유용']
-  },
   'api-data-go-kr': {
     title: '공공데이터포털',
     description: '정부 공공데이터를 조회합니다. 건축허가, 입찰정보, 기업정보 등 다양한 API 제공.',
@@ -520,31 +509,6 @@ const NODE_DESCRIPTIONS: Record<string, { title: string; description: string; us
     description: 'Knowledge Base에 새 문서를 추가합니다.',
     usage: ['Knowledge Base ID 입력', 'S3 데이터 소스 URI 설정'],
     tips: ['문서 업데이트 시 사용']
-  },
-  // KISTI ScienceON 노드
-  'kisti-articles': {
-    title: 'KISTI 논문 검색',
-    description: 'ScienceON API를 통해 국내외 학술논문을 검색합니다.',
-    usage: ['Client ID, Auth Key, Hardware Key 입력', '검색어 및 검색 필드 설정', '검색 결과 수 조절'],
-    tips: ['API 키는 scienceon.kisti.re.kr/openApi에서 신청', 'Hardware Key는 비워두면 자동 감지']
-  },
-  'kisti-patents': {
-    title: 'KISTI 특허 검색',
-    description: 'ScienceON API를 통해 국내외 특허정보를 검색합니다.',
-    usage: ['Client ID, Auth Key, Hardware Key 입력', '검색어 및 특허 유형 설정', '검색 결과 수 조절'],
-    tips: ['국내특허(KR), 미국특허(US), 일본특허(JP), 유럽특허(EP) 지원']
-  },
-  'kisti-reports': {
-    title: 'KISTI 보고서 검색',
-    description: 'ScienceON API를 통해 연구보고서를 검색합니다.',
-    usage: ['Client ID, Auth Key, Hardware Key 입력', '검색어 및 보고서 유형 설정'],
-    tips: ['연구보고서, 기술보고서, 정책보고서 검색 가능']
-  },
-  'kisti-trends': {
-    title: 'KISTI 동향 분석',
-    description: 'ScienceON API를 통해 과학기술 동향정보를 검색합니다.',
-    usage: ['Client ID, Auth Key, Hardware Key 입력', '검색어 및 동향 분야 설정'],
-    tips: ['IT/SW, 바이오/의료, 나노/소재, 에너지/환경, 건설/교통 분야 지원']
   },
 }
 
@@ -1778,29 +1742,6 @@ function PropertyPanelContent() {
           </Alert>
         </>
       ),
-      'api-scienceon': (
-        <>
-          <TextField fullWidth label="API 키" type="password" value={data.config?.api_key || ''} onChange={(e) => handleChange('api_key', e.target.value)} placeholder="KISTI에서 발급받은 API 키" sx={{ mb: 2 }} />
-          <FormControl fullWidth sx={{ mb: 2 }}>
-            <InputLabel>검색 범위</InputLabel>
-            <Select value={data.config?.search_scope || 'all'} label="검색 범위" onChange={(e) => handleChange('search_scope', e.target.value)}>
-              <MenuItem value="all">전체</MenuItem>
-              <MenuItem value="article">논문</MenuItem>
-              <MenuItem value="patent">특허</MenuItem>
-              <MenuItem value="report">보고서</MenuItem>
-              <MenuItem value="trend">동향</MenuItem>
-            </Select>
-          </FormControl>
-          <TextField fullWidth label="검색어" value={data.config?.query || ''} onChange={(e) => handleChange('query', e.target.value)} placeholder="검색할 키워드" sx={{ mb: 2 }} />
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="body2" color="grey.400" gutterBottom>검색 결과 수: {data.config?.display_count ?? 10}</Typography>
-            <Slider value={data.config?.display_count ?? 10} onChange={(_, value) => handleChange('display_count', value)} min={1} max={100} step={1} />
-          </Box>
-          <Alert severity="info" sx={{ fontSize: '0.7rem' }}>
-            Tip: API 키: <a href="https://scienceon.kisti.re.kr" target="_blank" style={{ color: '#a5b4fc' }}>scienceon.kisti.re.kr</a>에서 발급
-          </Alert>
-        </>
-      ),
       'api-data-go-kr': (
         <>
           <TextField fullWidth label="API 키" type="password" value={data.config?.api_key || ''} onChange={(e) => handleChange('api_key', e.target.value)} placeholder="공공데이터포털에서 발급받은 인증키" sx={{ mb: 2 }} />
@@ -1852,125 +1793,6 @@ function PropertyPanelContent() {
           <TextField fullWidth label="기간" value={data.config?.period || ''} onChange={(e) => handleChange('period', e.target.value)} placeholder="예: 2020,2021,2022" sx={{ mb: 2 }} />
           <Alert severity="info" sx={{ fontSize: '0.7rem' }}>
             Tip: API 키: <a href="https://kosis.kr" target="_blank" style={{ color: '#a5b4fc' }}>kosis.kr</a>에서 발급
-          </Alert>
-        </>
-      ),
-      // ========================================
-      // KISTI ScienceON 노드들
-      // ========================================
-      'kisti-articles': (
-        <>
-          <Alert severity="info" sx={{ mb: 2, fontSize: '0.75rem' }}>
-            <b>KISTI 논문 검색</b>: ScienceON API를 통해 국내외 학술논문을 검색합니다.
-          </Alert>
-          <TextField fullWidth label="Client ID" value={data.config?.client_id || ''} onChange={(e) => handleChange('client_id', e.target.value)} placeholder="ScienceON에서 발급받은 Client ID" sx={{ mb: 2 }} />
-          <TextField fullWidth label="Auth Key (API Key)" type="password" value={data.config?.auth_key || ''} onChange={(e) => handleChange('auth_key', e.target.value)} placeholder="ScienceON에서 발급받은 인증키" sx={{ mb: 2 }} />
-          <TextField fullWidth label="Hardware Key" value={data.config?.hardware_key || ''} onChange={(e) => handleChange('hardware_key', e.target.value)} placeholder="MAC 주소 (자동 감지됨)" sx={{ mb: 2 }} helperText="비워두면 자동으로 감지합니다" />
-          <Divider sx={{ my: 2, borderColor: 'rgba(255,255,255,0.1)' }} />
-          <TextField fullWidth label="검색어" value={data.config?.query || ''} onChange={(e) => handleChange('query', e.target.value)} placeholder="검색할 키워드" sx={{ mb: 2 }} />
-          <FormControl fullWidth sx={{ mb: 2 }}>
-            <InputLabel>검색 필드</InputLabel>
-            <Select value={data.config?.search_field || 'BI'} label="검색 필드" onChange={(e) => handleChange('search_field', e.target.value)}>
-              <MenuItem value="BI">전체 (BI)</MenuItem>
-              <MenuItem value="TI">제목 (TI)</MenuItem>
-              <MenuItem value="AU">저자 (AU)</MenuItem>
-              <MenuItem value="AB">초록 (AB)</MenuItem>
-              <MenuItem value="KW">키워드 (KW)</MenuItem>
-            </Select>
-          </FormControl>
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="body2" color="grey.400" gutterBottom>검색 결과 수: {data.config?.display_count ?? 10}</Typography>
-            <Slider value={data.config?.display_count ?? 10} onChange={(_, value) => handleChange('display_count', value)} min={1} max={100} step={1} />
-          </Box>
-          <Alert severity="success" sx={{ fontSize: '0.7rem' }}>
-            Tip: API 신청: <a href="https://scienceon.kisti.re.kr/openApi/openApiInfo.do" target="_blank" style={{ color: '#a5b4fc' }}>scienceon.kisti.re.kr/openApi</a>
-          </Alert>
-        </>
-      ),
-      'kisti-patents': (
-        <>
-          <Alert severity="info" sx={{ mb: 2, fontSize: '0.75rem' }}>
-            <b>KISTI 특허 검색</b>: ScienceON API를 통해 국내외 특허정보를 검색합니다.
-          </Alert>
-          <TextField fullWidth label="Client ID" value={data.config?.client_id || ''} onChange={(e) => handleChange('client_id', e.target.value)} placeholder="ScienceON에서 발급받은 Client ID" sx={{ mb: 2 }} />
-          <TextField fullWidth label="Auth Key (API Key)" type="password" value={data.config?.auth_key || ''} onChange={(e) => handleChange('auth_key', e.target.value)} placeholder="ScienceON에서 발급받은 인증키" sx={{ mb: 2 }} />
-          <TextField fullWidth label="Hardware Key" value={data.config?.hardware_key || ''} onChange={(e) => handleChange('hardware_key', e.target.value)} placeholder="MAC 주소 (자동 감지됨)" sx={{ mb: 2 }} helperText="비워두면 자동으로 감지합니다" />
-          <Divider sx={{ my: 2, borderColor: 'rgba(255,255,255,0.1)' }} />
-          <TextField fullWidth label="검색어" value={data.config?.query || ''} onChange={(e) => handleChange('query', e.target.value)} placeholder="검색할 키워드" sx={{ mb: 2 }} />
-          <FormControl fullWidth sx={{ mb: 2 }}>
-            <InputLabel>특허 유형</InputLabel>
-            <Select value={data.config?.patent_type || 'all'} label="특허 유형" onChange={(e) => handleChange('patent_type', e.target.value)}>
-              <MenuItem value="all">전체</MenuItem>
-              <MenuItem value="KR">국내 특허</MenuItem>
-              <MenuItem value="US">미국 특허</MenuItem>
-              <MenuItem value="JP">일본 특허</MenuItem>
-              <MenuItem value="EP">유럽 특허</MenuItem>
-            </Select>
-          </FormControl>
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="body2" color="grey.400" gutterBottom>검색 결과 수: {data.config?.display_count ?? 10}</Typography>
-            <Slider value={data.config?.display_count ?? 10} onChange={(_, value) => handleChange('display_count', value)} min={1} max={100} step={1} />
-          </Box>
-          <Alert severity="success" sx={{ fontSize: '0.7rem' }}>
-            Tip: API 신청: <a href="https://scienceon.kisti.re.kr/openApi/openApiInfo.do" target="_blank" style={{ color: '#a5b4fc' }}>scienceon.kisti.re.kr/openApi</a>
-          </Alert>
-        </>
-      ),
-      'kisti-reports': (
-        <>
-          <Alert severity="info" sx={{ mb: 2, fontSize: '0.75rem' }}>
-            📋 <b>KISTI 보고서 검색</b>: ScienceON API를 통해 연구보고서를 검색합니다.
-          </Alert>
-          <TextField fullWidth label="Client ID" value={data.config?.client_id || ''} onChange={(e) => handleChange('client_id', e.target.value)} placeholder="ScienceON에서 발급받은 Client ID" sx={{ mb: 2 }} />
-          <TextField fullWidth label="Auth Key (API Key)" type="password" value={data.config?.auth_key || ''} onChange={(e) => handleChange('auth_key', e.target.value)} placeholder="ScienceON에서 발급받은 인증키" sx={{ mb: 2 }} />
-          <TextField fullWidth label="Hardware Key" value={data.config?.hardware_key || ''} onChange={(e) => handleChange('hardware_key', e.target.value)} placeholder="MAC 주소 (자동 감지됨)" sx={{ mb: 2 }} helperText="비워두면 자동으로 감지합니다" />
-          <Divider sx={{ my: 2, borderColor: 'rgba(255,255,255,0.1)' }} />
-          <TextField fullWidth label="검색어" value={data.config?.query || ''} onChange={(e) => handleChange('query', e.target.value)} placeholder="검색할 키워드" sx={{ mb: 2 }} />
-          <FormControl fullWidth sx={{ mb: 2 }}>
-            <InputLabel>보고서 유형</InputLabel>
-            <Select value={data.config?.report_type || 'all'} label="보고서 유형" onChange={(e) => handleChange('report_type', e.target.value)}>
-              <MenuItem value="all">전체</MenuItem>
-              <MenuItem value="research">연구보고서</MenuItem>
-              <MenuItem value="tech">기술보고서</MenuItem>
-              <MenuItem value="policy">정책보고서</MenuItem>
-            </Select>
-          </FormControl>
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="body2" color="grey.400" gutterBottom>검색 결과 수: {data.config?.display_count ?? 10}</Typography>
-            <Slider value={data.config?.display_count ?? 10} onChange={(_, value) => handleChange('display_count', value)} min={1} max={100} step={1} />
-          </Box>
-          <Alert severity="success" sx={{ fontSize: '0.7rem' }}>
-            Tip: API 신청: <a href="https://scienceon.kisti.re.kr/openApi/openApiInfo.do" target="_blank" style={{ color: '#a5b4fc' }}>scienceon.kisti.re.kr/openApi</a>
-          </Alert>
-        </>
-      ),
-      'kisti-trends': (
-        <>
-          <Alert severity="info" sx={{ mb: 2, fontSize: '0.75rem' }}>
-            📈 <b>KISTI 동향 분석</b>: ScienceON API를 통해 과학기술 동향정보를 검색합니다.
-          </Alert>
-          <TextField fullWidth label="Client ID" value={data.config?.client_id || ''} onChange={(e) => handleChange('client_id', e.target.value)} placeholder="ScienceON에서 발급받은 Client ID" sx={{ mb: 2 }} />
-          <TextField fullWidth label="Auth Key (API Key)" type="password" value={data.config?.auth_key || ''} onChange={(e) => handleChange('auth_key', e.target.value)} placeholder="ScienceON에서 발급받은 인증키" sx={{ mb: 2 }} />
-          <TextField fullWidth label="Hardware Key" value={data.config?.hardware_key || ''} onChange={(e) => handleChange('hardware_key', e.target.value)} placeholder="MAC 주소 (자동 감지됨)" sx={{ mb: 2 }} helperText="비워두면 자동으로 감지합니다" />
-          <Divider sx={{ my: 2, borderColor: 'rgba(255,255,255,0.1)' }} />
-          <TextField fullWidth label="검색어" value={data.config?.query || ''} onChange={(e) => handleChange('query', e.target.value)} placeholder="검색할 키워드 (예: 인공지능, 건설기술)" sx={{ mb: 2 }} />
-          <FormControl fullWidth sx={{ mb: 2 }}>
-            <InputLabel>동향 분야</InputLabel>
-            <Select value={data.config?.trend_field || 'all'} label="동향 분야" onChange={(e) => handleChange('trend_field', e.target.value)}>
-              <MenuItem value="all">전체</MenuItem>
-              <MenuItem value="IT">IT/SW</MenuItem>
-              <MenuItem value="BT">바이오/의료</MenuItem>
-              <MenuItem value="NT">나노/소재</MenuItem>
-              <MenuItem value="ET">에너지/환경</MenuItem>
-              <MenuItem value="CT">건설/교통</MenuItem>
-            </Select>
-          </FormControl>
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="body2" color="grey.400" gutterBottom>검색 결과 수: {data.config?.display_count ?? 10}</Typography>
-            <Slider value={data.config?.display_count ?? 10} onChange={(_, value) => handleChange('display_count', value)} min={1} max={100} step={1} />
-          </Box>
-          <Alert severity="success" sx={{ fontSize: '0.7rem' }}>
-            Tip: API 신청: <a href="https://scienceon.kisti.re.kr/openApi/openApiInfo.do" target="_blank" style={{ color: '#a5b4fc' }}>scienceon.kisti.re.kr/openApi</a>
           </Alert>
         </>
       ),
@@ -2545,7 +2367,7 @@ function PropertyPanelContent() {
     if (type?.includes('agent')) return renderAgentConfig()
     if (type?.startsWith('bedrock-')) return renderBedrockPlatformConfig()
     if (type?.startsWith('aws-')) return renderAWSServiceConfig()
-    if (type?.startsWith('api-') || type?.startsWith('kisti-')) return renderAPIConfig()
+    if (type?.startsWith('api-')) return renderAPIConfig()
     if (type?.startsWith('viz-')) return renderVisualizationConfig()
     if (type?.startsWith('doc-')) return renderDocParserConfig()
     if (type?.startsWith('export-')) return renderExportConfig()
@@ -2642,7 +2464,7 @@ function PropertyPanelContent() {
         )}
         <Button variant="outlined" startIcon={<ContentCopyIcon />} onClick={handleDuplicate}>복제</Button>
         {/* 지식베이스 저장 버튼 - 관련 노드에서만 표시 */}
-        {(type?.includes('vector') || type?.includes('rag') || type?.includes('embed') || type?.includes('knowledge') || type?.includes('kisti') || type?.includes('dynamic_kb')) && (
+        {(type?.includes('vector') || type?.includes('rag') || type?.includes('embed') || type?.includes('knowledge') || type?.includes('dynamic_kb')) && (
           <Button
             variant="outlined"
             startIcon={<SaveIcon />}

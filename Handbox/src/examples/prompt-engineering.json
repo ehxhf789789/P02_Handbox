@@ -1,0 +1,160 @@
+{
+  "name": "프롬프트 엔지니어링",
+  "description": "Few-shot과 Chain-of-Thought 프롬프트 기법을 활용하는 워크플로우",
+  "category": "프롬프트",
+  "nodes": [
+    {
+      "id": "node_input",
+      "type": "io.local-file",
+      "position": { "x": 50, "y": 200 },
+      "data": {
+        "label": "분석 대상",
+        "color": "#22c55e",
+        "description": "분석할 텍스트 입력",
+        "config": {
+          "inputType": "text",
+          "placeholder": "분석할 내용을 입력하세요..."
+        }
+      }
+    },
+    {
+      "id": "node_agent",
+      "type": "prompt.agent",
+      "position": { "x": 300, "y": 100 },
+      "data": {
+        "label": "프롬프트 생성",
+        "color": "#f59e0b",
+        "description": "AI가 최적의 프롬프트 생성",
+        "config": {
+          "style": "structured",
+          "language": "ko"
+        }
+      }
+    },
+    {
+      "id": "node_fewshot",
+      "type": "prompt.few-shot",
+      "position": { "x": 300, "y": 200 },
+      "data": {
+        "label": "Few-Shot",
+        "color": "#ec4899",
+        "description": "예시 기반 프롬프트",
+        "config": {
+          "task_description": "다음 텍스트의 감정을 분석하세요.",
+          "examples": "[{\"input\": \"오늘 정말 좋은 하루였어요!\", \"output\": \"긍정적\"}, {\"input\": \"일이 너무 힘들어요\", \"output\": \"부정적\"}]"
+        }
+      }
+    },
+    {
+      "id": "node_cot",
+      "type": "prompt.cot",
+      "position": { "x": 300, "y": 300 },
+      "data": {
+        "label": "Chain-of-Thought",
+        "color": "#a855f7",
+        "description": "단계별 추론 프롬프트",
+        "config": {
+          "template_type": "analysis",
+          "include_examples": true
+        }
+      }
+    },
+    {
+      "id": "node_merge",
+      "type": "control.merge",
+      "position": { "x": 550, "y": 200 },
+      "data": {
+        "label": "프롬프트 병합",
+        "color": "#6b7280",
+        "description": "여러 프롬프트 결합",
+        "config": {
+          "mergeMode": "concat"
+        }
+      }
+    },
+    {
+      "id": "node_llm",
+      "type": "ai.llm-invoke",
+      "position": { "x": 800, "y": 200 },
+      "data": {
+        "label": "Claude 분석",
+        "color": "#6366f1",
+        "description": "고급 프롬프트로 분석",
+        "config": {
+          "modelId": "anthropic.claude-3-5-sonnet-20240620-v1:0",
+          "maxTokens": 2048,
+          "temperature": 0.5
+        }
+      }
+    },
+    {
+      "id": "node_output",
+      "type": "viz.result-viewer",
+      "position": { "x": 1050, "y": 200 },
+      "data": {
+        "label": "분석 결과",
+        "color": "#10b981",
+        "description": "분석 결과 표시",
+        "config": {}
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "node_input",
+      "target": "node_agent",
+      "animated": true,
+      "style": { "stroke": "#f59e0b", "strokeWidth": 2 }
+    },
+    {
+      "id": "e2",
+      "source": "node_input",
+      "target": "node_fewshot",
+      "animated": true,
+      "style": { "stroke": "#ec4899", "strokeWidth": 2 }
+    },
+    {
+      "id": "e3",
+      "source": "node_input",
+      "target": "node_cot",
+      "animated": true,
+      "style": { "stroke": "#a855f7", "strokeWidth": 2 }
+    },
+    {
+      "id": "e4",
+      "source": "node_agent",
+      "target": "node_merge",
+      "animated": true,
+      "style": { "stroke": "#6b7280", "strokeWidth": 2 }
+    },
+    {
+      "id": "e5",
+      "source": "node_fewshot",
+      "target": "node_merge",
+      "animated": true,
+      "style": { "stroke": "#6b7280", "strokeWidth": 2 }
+    },
+    {
+      "id": "e6",
+      "source": "node_cot",
+      "target": "node_merge",
+      "animated": true,
+      "style": { "stroke": "#6b7280", "strokeWidth": 2 }
+    },
+    {
+      "id": "e7",
+      "source": "node_merge",
+      "target": "node_llm",
+      "animated": true,
+      "style": { "stroke": "#6366f1", "strokeWidth": 2 }
+    },
+    {
+      "id": "e8",
+      "source": "node_llm",
+      "target": "node_output",
+      "animated": true,
+      "style": { "stroke": "#6366f1", "strokeWidth": 2 }
+    }
+  ]
+}

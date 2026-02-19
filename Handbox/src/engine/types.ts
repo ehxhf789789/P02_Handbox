@@ -23,6 +23,9 @@ export type DataType =
   | 'search-result[]'  // 검색 결과 배열
   | 'image'            // 이미지 (base64 또는 파일 경로)
   | 'binary'           // 바이너리 데이터
+  | 'table-data'       // 테이블 구조 (headers + rows)
+  | 'chart-data'       // 차트 데이터 (labels + datasets)
+  | 'storage-ref'      // 저장소 참조 (local/cloud path)
   | 'any'              // 타입 무관 (제어 노드, 패스스루 등)
 
 /** 데이터 타입 간 호환성 매트릭스 */
@@ -39,9 +42,12 @@ export const TYPE_COMPATIBILITY: Record<DataType, DataType[]> = {
   'search-result[]':  ['search-result[]', 'json[]', 'any'],
   'image':            ['image', 'file-ref', 'any'],
   'binary':           ['binary', 'any'],
+  'table-data':       ['table-data', 'json', 'any'],
+  'chart-data':       ['chart-data', 'json', 'any'],
+  'storage-ref':      ['storage-ref', 'text', 'file-ref', 'any'],
   'any':              ['text', 'text[]', 'file-ref', 'file-ref[]', 'json', 'json[]',
                        'vector', 'vector[]', 'llm-response', 'search-result[]',
-                       'image', 'binary', 'any'],
+                       'image', 'binary', 'table-data', 'chart-data', 'storage-ref', 'any'],
 }
 
 /** 출력 타입이 입력 타입에 연결 가능한지 확인 */

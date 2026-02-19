@@ -12,10 +12,9 @@ import SearchIcon from '@mui/icons-material/Search'
 import DataObjectIcon from '@mui/icons-material/DataObject'
 import HubIcon from '@mui/icons-material/Hub'
 import TrendingUpIcon from '@mui/icons-material/TrendingUp'
-import PublicIcon from '@mui/icons-material/Public'
+// PublicIcon 제거됨 - 공공데이터 API 노드 삭제
 import ScienceIcon from '@mui/icons-material/Science'
 import DescriptionIcon from '@mui/icons-material/Description'
-import AssignmentIcon from '@mui/icons-material/Assignment'
 import GavelIcon from '@mui/icons-material/Gavel'
 import FolderOpenIcon from '@mui/icons-material/FolderOpen'
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile'
@@ -79,7 +78,7 @@ const getTemplateIcon = (iconName: string): React.ReactNode => {
 }
 
 // 인증 요구사항 타입
-type AuthRequirement = 'none' | 'aws' | 'kisti' | 'api_key'
+type AuthRequirement = 'none' | 'aws' | 'api_key'
 
 interface NodeTypeConfig {
   type: string
@@ -128,21 +127,7 @@ const KNOWLEDGE_BASE_NODES: NodeTypeConfig[] = [
   { type: 'rag-retriever', label: 'RAG 검색', icon: <SearchIcon />, color: '#a855f7', description: '유사 문서 검색', useCase: 'RAG 검색', provider: 'AWS', keywords: ['rag', '검색', 'retriever', '유사도'], authRequired: 'aws' },
 ]
 
-// 5. KISTI ScienceON - [KISTI 인증 필요]
-const KISTI_NODES: NodeTypeConfig[] = [
-  { type: 'kisti-articles', label: 'KISTI 논문', icon: <DescriptionIcon />, color: '#8b5cf6', description: '학술논문 검색', useCase: '국내외 학술논문', provider: 'KISTI', keywords: ['kisti', '논문', 'article', '학술'], authRequired: 'kisti' },
-  { type: 'kisti-patents', label: 'KISTI 특허', icon: <GavelIcon />, color: '#a855f7', description: '특허정보 검색', useCase: '국내외 특허', provider: 'KISTI', keywords: ['kisti', '특허', 'patent'], authRequired: 'kisti' },
-  { type: 'kisti-reports', label: 'KISTI 보고서', icon: <AssignmentIcon />, color: '#c084fc', description: '연구보고서 검색', useCase: '연구/기술 보고서', provider: 'KISTI', keywords: ['kisti', '보고서', 'report'], authRequired: 'kisti' },
-  { type: 'kisti-trends', label: 'KISTI 동향', icon: <TrendingUpIcon />, color: '#d946ef', description: '과학기술 동향', useCase: '기술동향 분석', provider: 'KISTI', keywords: ['kisti', '동향', 'trend'], authRequired: 'kisti' },
-]
-
-// 6. 공공데이터 API - [API 키 필요]
-const PUBLIC_API_NODES: NodeTypeConfig[] = [
-  { type: 'api-kipris', label: 'KIPRIS 특허', icon: <GavelIcon />, color: '#2563eb', description: '특허정보검색', useCase: '특허/실용신안 검색', provider: '특허청', keywords: ['kipris', '특허', '실용신안'], authRequired: 'api_key', stub: true },
-  { type: 'api-data-go-kr', label: '공공데이터포털', icon: <PublicIcon />, color: '#059669', description: '정부 공공데이터', useCase: '공공API 호출', provider: '행정안전부', keywords: ['공공데이터', '정부', 'api'], authRequired: 'api_key', stub: true },
-]
-
-// 7. AI 모델 (Bedrock) - [AWS 인증 필요]
+// 5. AI 모델 (Bedrock) - [AWS 인증 필요]
 const AI_MODEL_NODES: NodeTypeConfig[] = [
   { type: 'model-claude-3-5-sonnet', label: 'Claude 3.5 Sonnet', icon: <PsychologyIcon />, color: '#6366f1', description: '최신 고성능 모델', useCase: '복잡한 분석, 코딩', provider: 'Anthropic', keywords: ['claude', 'anthropic', 'llm', 'ai'], authRequired: 'aws' },
   { type: 'model-claude-3-opus', label: 'Claude 3 Opus', icon: <PsychologyIcon />, color: '#8b5cf6', description: '최고 성능 모델', useCase: '고급 추론, 연구', provider: 'Anthropic', keywords: ['claude', 'opus', 'llm'], authRequired: 'aws' },
@@ -150,19 +135,19 @@ const AI_MODEL_NODES: NodeTypeConfig[] = [
   { type: 'custom-agent', label: '커스텀 에이전트', icon: <SmartToyIcon />, color: '#6366f1', description: '사용자 정의 에이전트', useCase: '커스텀 역할 수행', provider: 'AWS Bedrock', keywords: ['에이전트', 'agent', '커스텀'], authRequired: 'aws' },
 ]
 
-// 8. 제어 흐름 (Control Flow)
+// 7. 제어 흐름 (Control Flow)
 const CONTROL_FLOW_NODES: NodeTypeConfig[] = [
   { type: 'merge', label: '병합', icon: <HubIcon />, color: '#c084fc', description: '다중 입력 결합', useCase: '여러 출력 합치기', keywords: ['병합', 'merge', '결합'] },
   { type: 'conditional', label: '조건 분기', icon: <HubIcon />, color: '#8b5cf6', description: 'IF/ELSE 분기', useCase: '조건부 실행', keywords: ['조건', 'if', 'else', '분기'], stub: true },
 ]
 
-// 9. 내보내기 (Export) - Tauri 연동
+// 8. 내보내기 (Export) - Tauri 연동
 const EXPORT_NODES: NodeTypeConfig[] = [
   { type: 'export-excel', label: 'Excel 내보내기', icon: <TableChartIcon />, color: '#22c55e', description: 'XLSX 파일 생성', useCase: '데이터 내보내기', keywords: ['excel', 'xlsx', '내보내기', '엑셀'] },
   { type: 'export-pdf', label: 'PDF 내보내기', icon: <PictureAsPdfIcon />, color: '#ef4444', description: 'PDF 파일 생성', useCase: '리포트 생성', keywords: ['pdf', '내보내기', '리포트'] },
 ]
 
-// 10. 시각화 (Visualization)
+// 9. 시각화 (Visualization)
 const VISUALIZATION_NODES: NodeTypeConfig[] = [
   { type: 'viz-result-viewer', label: '결과 뷰어', icon: <PreviewIcon />, color: '#6366f1', description: '실행 결과 미리보기', useCase: '결과 확인', keywords: ['결과', '뷰어', '미리보기'] },
   { type: 'viz-evaluator-result', label: '평가 결과', icon: <AssessmentIcon />, color: '#f59e0b', description: 'CNT 평가 결과 표시', useCase: '평가위원 결과', keywords: ['평가', '결과', 'cnt'] },
@@ -173,15 +158,13 @@ const VISUALIZATION_NODES: NodeTypeConfig[] = [
 ]
 
 // ========================================
-// 카테고리 정의 - 실제 구현된 노드만 (10개 카테고리)
+// 카테고리 정의 - 핵심 노드만 (8개 카테고리)
 // ========================================
 const NODE_CATEGORIES = [
   { title: '입출력', icon: <InputIcon />, nodes: IO_NODES, defaultExpanded: true },
   { title: '문서 파싱', icon: <ArticleIcon />, nodes: DOCUMENT_PARSER_NODES, defaultExpanded: true },
   { title: '텍스트 처리', icon: <TransformIcon />, nodes: TEXT_PROCESSING_NODES, defaultExpanded: true },
   { title: '지식베이스 [AWS]', icon: <StorageIcon />, nodes: KNOWLEDGE_BASE_NODES, defaultExpanded: true },
-  { title: 'KISTI ScienceON', icon: <ScienceIcon />, nodes: KISTI_NODES, defaultExpanded: true },
-  { title: '공공데이터 API', icon: <PublicIcon />, nodes: PUBLIC_API_NODES, defaultExpanded: false },
   { title: 'AI 모델 [AWS]', icon: <PsychologyIcon />, nodes: AI_MODEL_NODES, defaultExpanded: true },
   { title: '제어 흐름', icon: <HubIcon />, nodes: CONTROL_FLOW_NODES, defaultExpanded: false },
   { title: '내보내기', icon: <DownloadIcon />, nodes: EXPORT_NODES, defaultExpanded: true },
@@ -217,7 +200,7 @@ function getRegistryOnlyNodes(): NodeTypeConfig[] {
 export default function NodePalette() {
   const { startDrag, updatePosition } = useDragStore()
   const { addTemplate } = useWorkflowStore()
-  const { useAWSConnection, awsStatus, externalAPIs } = useAppStore()
+  const { useAWSConnection, awsStatus } = useAppStore()
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState(0)
 
@@ -244,14 +227,18 @@ export default function NodePalette() {
       // 해당 카테고리의 하드코딩 노드 (category 매핑)
       const catMap: Record<string, string[]> = {
         'io': ['input', 'output', 'local-folder', 'local-file'],
+        'data': ['data.file-loader', 'data.preprocess'],
+        'storage': ['storage.local', 'storage.cloud', 'storage.unified'],
+        'rag': ['rag.retriever', 'rag.context-builder'],
+        'prompt': ['prompt.template', 'prompt.agent', 'prompt.few-shot', 'prompt.cot'],
         'convert': ['doc-pdf-parser', 'doc-hwp-parser', 'doc-word-parser', 'doc-excel-parser'],
         'text': ['text-splitter', 'prompt-template'],
         'vector': ['embedder', 'vector-store', 'rag-retriever'],
-        'ai': ['model-claude-3-5-sonnet', 'model-claude-3-opus', 'model-claude-3-haiku', 'custom-agent'],
-        'control': ['merge', 'conditional'],
-        'export': ['export-excel', 'export-pdf'],
-        'viz': ['viz-result-viewer', 'viz-evaluator-result', 'viz-vote-chart', 'viz-citation', 'viz-json-viewer', 'viz-chart'],
-        'api': ['api-kipris', 'api-data-go-kr'],
+        'ai': ['ai.llm-invoke', 'ai.embedding', 'model-claude-3-5-sonnet', 'model-claude-3-opus', 'model-claude-3-haiku', 'custom-agent'],
+        'control': ['merge', 'conditional', 'control.merge', 'control.conditional', 'control.cli', 'control.script'],
+        'export': ['export-excel', 'export-pdf', 'export.excel'],
+        'viz': ['viz-result-viewer', 'viz-json-viewer', 'viz-chart', 'viz.result-viewer', 'viz.json-viewer', 'viz.chart', 'viz.table', 'viz.stats'],
+        'extension': [],
       }
       const hardcodedTypes = catMap[cat.id] || []
       const hardcodedNodes = hardcodedTypes
@@ -273,18 +260,6 @@ export default function NodePalette() {
       })
     }
 
-    // KISTI 카테고리 (plugin에서 등록, 카테고리가 DEFAULT에 없을 수 있음)
-    const kistiNodes = ALL_NODES.filter(n => n.type.startsWith('kisti-'))
-    if (kistiNodes.length > 0 && !result.find(r => r.id === 'kisti')) {
-      result.push({
-        id: 'kisti',
-        title: 'KISTI ScienceON',
-        icon: getIcon('Science', { fontSize: 18 }),
-        nodes: kistiNodes,
-        defaultExpanded: false,
-      })
-    }
-
     return result
   }, [registryExtraNodes])
 
@@ -292,9 +267,6 @@ export default function NodePalette() {
   const isAuthMet = (authRequired?: AuthRequirement): boolean => {
     if (!authRequired || authRequired === 'none') return true
     if (authRequired === 'aws') return useAWSConnection && awsStatus?.connected === true
-    // KISTI는 externalAPIs 통합 시스템 사용
-    if (authRequired === 'kisti') return externalAPIs?.kisti?.enabled === true
-    // 기타 API도 externalAPIs 확인
     if (authRequired === 'api_key') return true  // API 키는 노드별로 설정하므로 항상 사용 가능
     return true
   }
@@ -303,7 +275,6 @@ export default function NodePalette() {
   const getAuthLabel = (authRequired?: AuthRequirement): string => {
     if (!authRequired || authRequired === 'none') return ''
     if (authRequired === 'aws') return 'AWS 인증 필요'
-    if (authRequired === 'kisti') return 'KISTI 인증 필요'
     if (authRequired === 'api_key') return 'API 키 필요'
     return ''
   }

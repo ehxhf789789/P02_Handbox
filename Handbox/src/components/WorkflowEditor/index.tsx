@@ -66,6 +66,7 @@ import GenericNode from '../../nodes/GenericNode'
 import InputNode from '../../nodes/InputNode'
 import OutputNode from '../../nodes/OutputNode'
 import { validateConnection } from '../../engine/ExecutionEngine'
+import { NodeRegistry } from '../../registry/NodeRegistry'
 
 // 그룹 노드 컴포넌트 - 메모이제이션
 const GroupNode = memo(function GroupNode({ data }: { data: { label: string; color: string } }) {
@@ -106,45 +107,20 @@ const nodeTypes: Record<string, any> = {
   'output': OutputNode,
   'group': GroupNode,
 }
-// ===== 노드 타입 등록 =====
-const allNodeTypes = [
-  // 1. 입출력
-  'input', 'output', 'local-folder', 'local-file',
-  // 2. 문서 파싱
-  'doc-pdf-parser', 'doc-hwp-parser', 'doc-word-parser', 'doc-excel-parser',
-  // 3. 텍스트 처리
-  'text-splitter', 'prompt-template',
-  // 4. 지식베이스
-  'embedder', 'vector-store', 'vector-opensearch', 'vector-search',
-  'rag-retriever', 'kb-query', 'bedrock-knowledge-base',
-  // 5. KISTI ScienceON
-  'kisti-articles', 'kisti-patents', 'kisti-reports', 'kisti-trends',
-  'kisti-search', 'api-kisti',
-  // 6. 공공데이터 API
-  'api-kipris', 'api-data-go-kr',
-  // 7. AI 모델 (Bedrock)
-  'model-claude-3-5-sonnet', 'model-claude-3-opus', 'model-claude-3-haiku',
-  'model-claude-3-5-haiku', 'model-claude-4-sonnet', 'model-claude-4-opus',
-  'custom-agent',
-  // 8. AWS 서비스
-  'aws-translate', 'aws-comprehend', 'aws-textract', 'aws-s3',
-  'aws-lambda', 'aws-polly', 'aws-rekognition', 'aws-lex',
-  'aws-kendra', 'aws-sagemaker', 'aws-dynamodb', 'aws-step-functions',
-  'aws-bedrock-agent', 'aws-entity-recognition',
-  // 9. 제어 흐름
-  'merge', 'conditional', 'loop', 'scheduler', 'webhook',
-  // 10. 내보내기
-  'export-excel', 'export-pdf', 'export-word', 'export-ppt',
-  // 11. 시각화
-  'viz-result-viewer', 'viz-evaluator-result', 'viz-vote-chart',
-  'viz-citation', 'viz-json-viewer', 'viz-chart',
-]
-// input과 output은 전용 컴포넌트, 나머지는 GenericNode
-allNodeTypes.forEach(type => {
-  if (type !== 'input' && type !== 'output') {
-    nodeTypes[type] = GenericNode
+
+// ===== NodeRegistry에서 모든 노드 타입 동적 등록 =====
+function registerAllNodeTypes() {
+  // NodeRegistry에 등록된 모든 노드를 가져와서 등록
+  const allDefinitions = NodeRegistry.getAll()
+  for (const def of allDefinitions) {
+    if (def.type !== 'input' && def.type !== 'output' && !nodeTypes[def.type]) {
+      nodeTypes[def.type] = GenericNode
+    }
   }
-})
+}
+
+// 초기 등록 시도 (앱 초기화 시점에 따라 비어있을 수 있음)
+registerAllNodeTypes()
 
 // 워크플로우 로드 시 미등록 노드 타입을 동적 등록
 export const ensureNodeTypeRegistered = (type: string) => {
@@ -274,11 +250,15 @@ const WorkflowEditorInner = memo(function WorkflowEditorInner() {
 
   // 워크플로우의 모든 노드 타입이 등록되어 있는지 확인 (동적 등록)
   useEffect(() => {
+    // NodeRegistry에서 모든 노드 타입 재등록 (초기화 후 추가된 노드 포함)
+    registerAllNodeTypes()
+
     let needsUpdate = false
     for (const node of nodes) {
       if (node.type && !nodeTypes[node.type]) {
         nodeTypes[node.type] = GenericNode
         needsUpdate = true
+        console.log(`[WorkflowEditor] 노드 타입 동적 등록: ${node.type}`)
       }
     }
     if (needsUpdate) {

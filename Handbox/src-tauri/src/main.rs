@@ -1,5 +1,5 @@
-// CNT Agent Studio - Rust Backend
-// Tauri + AWS SDK 통합
+// Handbox - Universal Sandbox Platform
+// Tauri + AWS SDK + MCP 통합
 
 #![cfg_attr(
     all(not(debug_assertions), target_os = "windows"),
@@ -58,6 +58,56 @@ fn main() {
             // CLI / 스크립트 실행
             commands::cli::execute_cli,
             commands::cli::execute_python_script,
+            commands::cli::detect_cli_providers,
+            commands::cli::get_cli_provider_info,
+            commands::cli::test_aws_cli_credentials,
+            commands::cli::ollama_chat,
+            commands::cli::execute_cli_with_env,
+
+            // Credential Vault (보안 자격증명 저장소)
+            commands::credentials::credential_store,
+            commands::credentials::credential_retrieve,
+            commands::credentials::credential_delete,
+            commands::credentials::credential_get_metadata,
+            commands::credentials::credential_has_provider,
+            commands::credentials::credential_store_aws,
+            commands::credentials::credential_retrieve_aws,
+
+            // MCP Server Manager
+            commands::mcp::mcp_start_server,
+            commands::mcp::mcp_stop_server,
+            commands::mcp::mcp_get_server_status,
+            commands::mcp::mcp_initialize,
+            commands::mcp::mcp_list_tools,
+            commands::mcp::mcp_call_tool,
+            commands::mcp::mcp_get_resource,
+            commands::mcp::mcp_list_servers,
+
+            // Phase 3: 데이터 로더
+            commands::data_loader::parse_excel,
+            commands::data_loader::parse_csv,
+            commands::data_loader::detect_file_type,
+            commands::data_loader::load_text_file,
+
+            // Phase 3: 로컬 저장소 (SQLite/JSON)
+            commands::local_storage::sqlite_init,
+            commands::local_storage::sqlite_create_table,
+            commands::local_storage::sqlite_save,
+            commands::local_storage::sqlite_save_batch,
+            commands::local_storage::sqlite_query,
+            commands::local_storage::sqlite_list_tables,
+            commands::local_storage::json_file_save,
+            commands::local_storage::json_file_load,
+            commands::local_storage::json_file_append,
+
+            // Phase 3: 벡터 저장소
+            commands::vector_store::vector_create_index,
+            commands::vector_store::vector_list_indices,
+            commands::vector_store::vector_add,
+            commands::vector_store::vector_search,
+            commands::vector_store::vector_text_search,
+            commands::vector_store::vector_hybrid_search,
+            commands::vector_store::vector_delete_index,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

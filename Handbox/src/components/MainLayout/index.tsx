@@ -24,13 +24,11 @@ import UploadFileIcon from '@mui/icons-material/UploadFile'
 import FileDownloadIcon from '@mui/icons-material/FileDownload'
 import LogoutIcon from '@mui/icons-material/Logout'
 import PersonIcon from '@mui/icons-material/Person'
-import ApiIcon from '@mui/icons-material/Api'
 
 import { serializeWorkflow, downloadWorkflow, parseWorkflowJSON, deserializeWorkflow } from '../../utils/workflowSerializer'
 import NodePalette from '../NodePalette'
 import AISettingsDialog from '../AISettingsDialog'
 import MCPSettingsDialog from '../MCPSettingsDialog'
-import ExternalAPISettingsDialog from '../ExternalAPISettingsDialog'
 import { clearSavedCredentials } from '../ProviderSetup'
 import sampleRagWorkflow from '../../examples/sample-rag-workflow.json'
 import sampleTextGenWorkflow from '../../examples/sample-text-generation.json'
@@ -38,11 +36,7 @@ import sampleTranslateWorkflow from '../../examples/sample-translate.json'
 import sampleSentimentWorkflow from '../../examples/sample-sentiment.json'
 import sampleConnectionTestWorkflow from '../../examples/sample-aws-connection-test.json'
 import sampleDocumentAnalysis from '../../examples/sample-document-analysis.json'
-import samplePatentSearch from '../../examples/sample-patent-search.json'
-import sampleResearchPaper from '../../examples/sample-research-paper.json'
-import sampleCntAssessment from '../../examples/sample-cnt-assessment.json'
 import sampleS3BedrockPipeline from '../../examples/sample-s3-bedrock-pipeline.json'
-import sampleNtisAnalysis from '../../examples/sample-ntis-project-analysis.json'
 // 새로 추가된 워크플로우
 import sampleDocumentSummary from '../../examples/sample-document-summary.json'
 import sampleMultilingualContent from '../../examples/sample-multilingual-content.json'
@@ -53,11 +47,9 @@ import sampleReportGenerator from '../../examples/sample-report-generator.json'
 import sampleDataExtraction from '../../examples/sample-data-extraction.json'
 import sampleFaqChatbot from '../../examples/sample-faq-chatbot.json'
 import sampleEmailAutomation from '../../examples/sample-email-automation.json'
-// CNT 평가 연구 워크플로우 - 통합 파이프라인만 유지
-import cntFullPipeline from '../../data/workflows/cnt-integrated-workflow.json'
 import WorkflowEditor from '../WorkflowEditor'
 
-// 샘플 워크플로우 목록 - P1-P4 분리 워크플로우 제거, 통합 워크플로우만 유지
+// 샘플 워크플로우 목록 - 핵심 기능만 유지
 const SAMPLE_WORKFLOWS = [
   // 기본 워크플로우
   { id: 'connection-test', name: 'AWS 연결 테스트', data: sampleConnectionTestWorkflow, icon: '🔌', category: '기본' },
@@ -79,13 +71,6 @@ const SAMPLE_WORKFLOWS = [
   // 분석
   { id: 'image-analysis', name: '이미지 분석', data: sampleImageAnalysis, icon: '🖼️', category: '분석' },
   { id: 'code-review', name: 'AI 코드 리뷰', data: sampleCodeReview, icon: '👨‍💻', category: '분석' },
-  // 건설신기술 평가 - 통합 워크플로우
-  { id: 'cnt-assessment', name: '건설신기술 평가 (간단)', data: sampleCntAssessment, icon: '🏗️', category: '건설신기술' },
-  { id: 'cnt-integrated', name: 'CNT 통합 평가 시스템', data: cntFullPipeline, icon: '🚀', category: '건설신기술' },
-  // 한국 API
-  { id: 'patent-search', name: '특허 검색 및 분석', data: samplePatentSearch, icon: '🔍', category: '한국API' },
-  { id: 'research-paper', name: '학술논문 검색', data: sampleResearchPaper, icon: '📑', category: '한국API' },
-  { id: 'ntis-analysis', name: 'NTIS R&D 분석', data: sampleNtisAnalysis, icon: '🔬', category: '한국API' },
   // AWS
   { id: 's3-bedrock', name: 'S3-Bedrock 분석', data: sampleS3BedrockPipeline, icon: '☁️', category: 'AWS' },
 ]
@@ -122,7 +107,6 @@ function MainLayoutContent() {
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false)
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false)
   const [mcpSettingsOpen, setMcpSettingsOpen] = useState(false)
-  const [externalAPISettingsOpen, setExternalAPISettingsOpen] = useState(false)
 
   // 현재 워크플로우
   const [currentWorkflowId, setCurrentWorkflowId] = useState<string | null>(null)
@@ -447,12 +431,6 @@ function MainLayoutContent() {
           <Tooltip title="MCP 확장">
             <IconButton onClick={() => setMcpSettingsOpen(true)} sx={{ color: 'rgba(255,255,255,0.7)', '&:hover': { color: '#fff', background: 'rgba(255,255,255,0.1)' } }}>
               <ExtensionIcon />
-            </IconButton>
-          </Tooltip>
-
-          <Tooltip title="외부 API 설정">
-            <IconButton onClick={() => setExternalAPISettingsOpen(true)} sx={{ color: 'rgba(255,255,255,0.7)', '&:hover': { color: '#fff', background: 'rgba(255,255,255,0.1)' } }}>
-              <ApiIcon />
             </IconButton>
           </Tooltip>
 
@@ -802,8 +780,6 @@ function MainLayoutContent() {
       {/* MCP Settings Dialog */}
       <MCPSettingsDialog open={mcpSettingsOpen} onClose={() => setMcpSettingsOpen(false)} />
 
-      {/* External API Settings Dialog */}
-      <ExternalAPISettingsDialog open={externalAPISettingsOpen} onClose={() => setExternalAPISettingsOpen(false)} />
     </Box>
   )
 }

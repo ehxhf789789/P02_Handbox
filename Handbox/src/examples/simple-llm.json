@@ -1,0 +1,83 @@
+{
+  "name": "간단한 LLM 호출",
+  "description": "프롬프트 템플릿을 통해 LLM 모델을 호출하는 기본 워크플로우",
+  "category": "기본",
+  "nodes": [
+    {
+      "id": "node_input",
+      "type": "io.local-file",
+      "position": { "x": 50, "y": 150 },
+      "data": {
+        "label": "입력 텍스트",
+        "color": "#22c55e",
+        "description": "사용자 입력",
+        "config": {
+          "inputType": "text",
+          "placeholder": "질문을 입력하세요..."
+        }
+      }
+    },
+    {
+      "id": "node_prompt",
+      "type": "prompt.template",
+      "position": { "x": 300, "y": 150 },
+      "data": {
+        "label": "프롬프트 템플릿",
+        "color": "#f59e0b",
+        "description": "시스템 프롬프트 구성",
+        "config": {
+          "template": "당신은 도움이 되는 AI 어시스턴트입니다.\n\n사용자 질문: {{input}}\n\n답변:"
+        }
+      }
+    },
+    {
+      "id": "node_llm",
+      "type": "ai.llm-invoke",
+      "position": { "x": 550, "y": 150 },
+      "data": {
+        "label": "Claude 3.5 Sonnet",
+        "color": "#6366f1",
+        "description": "LLM 호출",
+        "config": {
+          "modelId": "anthropic.claude-3-5-sonnet-20240620-v1:0",
+          "maxTokens": 1024,
+          "temperature": 0.7
+        }
+      }
+    },
+    {
+      "id": "node_output",
+      "type": "viz.result-viewer",
+      "position": { "x": 800, "y": 150 },
+      "data": {
+        "label": "결과 출력",
+        "color": "#10b981",
+        "description": "응답 표시",
+        "config": {}
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "node_input",
+      "target": "node_prompt",
+      "animated": true,
+      "style": { "stroke": "#6366f1", "strokeWidth": 2 }
+    },
+    {
+      "id": "e2",
+      "source": "node_prompt",
+      "target": "node_llm",
+      "animated": true,
+      "style": { "stroke": "#6366f1", "strokeWidth": 2 }
+    },
+    {
+      "id": "e3",
+      "source": "node_llm",
+      "target": "node_output",
+      "animated": true,
+      "style": { "stroke": "#6366f1", "strokeWidth": 2 }
+    }
+  ]
+}

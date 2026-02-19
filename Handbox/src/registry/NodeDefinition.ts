@@ -106,21 +106,28 @@ export interface NodeCategory {
   defaultExpanded: boolean
 }
 
-/** 기본 카테고리 목록 */
+/** 기본 카테고리 목록 - 6개 핵심 카테고리 중심 */
 export const DEFAULT_CATEGORIES: NodeCategory[] = [
-  { id: 'io',          label: '파일 입출력',        icon: 'FolderOpen',    order: 0,  defaultExpanded: true },
-  { id: 'convert',     label: '파일 변환',          icon: 'Transform',     order: 1,  defaultExpanded: true },
-  { id: 'text',        label: '텍스트 처리',        icon: 'TextFields',    order: 2,  defaultExpanded: true },
-  { id: 'prompt',      label: '프롬프트 엔지니어링', icon: 'Edit',          order: 3,  defaultExpanded: true },
+  // === 핵심 데이터 파이프라인 카테고리 ===
+  { id: 'data',        label: '데이터 로드',        icon: 'Storage',       order: 0,  defaultExpanded: true },
+  { id: 'storage',     label: '저장소',             icon: 'CloudQueue',    order: 1,  defaultExpanded: true },
+  { id: 'rag',         label: 'RAG 검색',           icon: 'Search',        order: 2,  defaultExpanded: true },
+  { id: 'prompt',      label: '프롬프트',           icon: 'Edit',          order: 3,  defaultExpanded: true },
   { id: 'ai',          label: 'AI 모델',            icon: 'Psychology',    order: 4,  defaultExpanded: true },
-  { id: 'vector',      label: '벡터/검색',          icon: 'Storage',       order: 5,  defaultExpanded: true },
-  { id: 'cloud.aws',   label: 'AWS 서비스',         icon: 'Cloud',         order: 6,  defaultExpanded: false },
-  { id: 'cloud.gcp',   label: 'GCP 서비스',         icon: 'Cloud',         order: 7,  defaultExpanded: false },
-  { id: 'cloud.azure', label: 'Azure 서비스',       icon: 'Cloud',         order: 8,  defaultExpanded: false },
-  { id: 'api',         label: 'API 연동',           icon: 'Api',           order: 9,  defaultExpanded: false },
-  { id: 'control',     label: '제어 흐름',          icon: 'Hub',           order: 10, defaultExpanded: false },
-  { id: 'data',        label: '데이터 변환',        icon: 'DataObject',    order: 11, defaultExpanded: false },
-  { id: 'export',      label: '내보내기',           icon: 'Download',      order: 12, defaultExpanded: true },
-  { id: 'viz',         label: '시각화',             icon: 'BarChart',      order: 13, defaultExpanded: false },
+  { id: 'viz',         label: '시각화',             icon: 'BarChart',      order: 5,  defaultExpanded: true },
+
+  // === 유틸리티 카테고리 ===
+  { id: 'control',     label: '제어 흐름',          icon: 'Hub',           order: 6,  defaultExpanded: false },
+  { id: 'export',      label: '내보내기',           icon: 'Download',      order: 7,  defaultExpanded: true },
+  { id: 'extension',   label: '확장 (준비중)',      icon: 'Extension',     order: 8,  defaultExpanded: false },
+
+  // === 레거시/기타 카테고리 (하위 호환성) ===
+  { id: 'io',          label: '파일 입출력',        icon: 'FolderOpen',    order: 10, defaultExpanded: false },
+  { id: 'convert',     label: '파일 변환',          icon: 'Transform',     order: 11, defaultExpanded: false },
+  { id: 'text',        label: '텍스트 처리',        icon: 'TextFields',    order: 12, defaultExpanded: false },
+  { id: 'api',         label: 'API 연동',           icon: 'Api',           order: 13, defaultExpanded: false },
+
+  // === 동적 카테고리 ===
+  { id: 'mcp',         label: 'MCP 도구',           icon: 'SmartToy',      order: 14, defaultExpanded: true },
   { id: 'plugin',      label: '플러그인',           icon: 'Extension',     order: 99, defaultExpanded: false },
 ]
