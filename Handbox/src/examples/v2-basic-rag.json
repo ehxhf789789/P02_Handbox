@@ -1,0 +1,178 @@
+{
+  "version": "2.0.0",
+  "id": "v2-basic-rag",
+  "meta": {
+    "name": "Basic RAG Pipeline",
+    "description": "파일을 읽어 청킹 → 임베딩 → 벡터 저장 → 검색 → 프롬프트 구성 → LLM 답변 생성. Tier 1 내장 도구만 사용하는 기본 RAG 파이프라인.",
+    "author": "Handbox",
+    "tags": ["rag", "vector", "embedding", "llm", "tier1"],
+    "category": "rag",
+    "createdAt": "2026-02-20T00:00:00Z",
+    "updatedAt": "2026-02-20T00:00:00Z"
+  },
+  "variables": [
+    {
+      "key": "question",
+      "label": "질문",
+      "type": "text",
+      "default": "이 문서의 핵심 내용을 요약해주세요.",
+      "description": "RAG 파이프라인에 전달할 사용자 질문"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "file_read",
+      "type": "io.file-read",
+      "position": { "x": 50, "y": 100 },
+      "data": {
+        "label": "파일 읽기",
+        "color": "#3b82f6",
+        "description": "분석할 문서를 로드합니다",
+        "config": {
+          "path": "",
+          "encoding": "auto"
+        }
+      }
+    },
+    {
+      "id": "text_split",
+      "type": "transform.text-split",
+      "position": { "x": 300, "y": 100 },
+      "data": {
+        "label": "텍스트 청킹",
+        "color": "#f59e0b",
+        "description": "문서를 검색 가능한 청크로 분할",
+        "config": {
+          "method": "recursive",
+          "chunk_size": 1000,
+          "chunk_overlap": 200,
+          "preserve_sentences": true
+        }
+      }
+    },
+    {
+      "id": "embed_chunks",
+      "type": "llm.embed",
+      "position": { "x": 550, "y": 100 },
+      "data": {
+        "label": "임베딩 생성",
+        "color": "#8b5cf6",
+        "description": "청크를 벡터로 변환",
+        "config": {
+          "provider": "",
+          "model": ""
+        }
+      }
+    },
+    {
+      "id": "vector_store",
+      "type": "storage.vector-store",
+      "position": { "x": 800, "y": 100 },
+      "data": {
+        "label": "벡터 저장",
+        "color": "#06b6d4",
+        "description": "임베딩을 벡터 DB에 저장",
+        "config": {
+          "collection": "rag_docs"
+        }
+      }
+    },
+    {
+      "id": "query_input",
+      "type": "data.constant",
+      "position": { "x": 50, "y": 350 },
+      "data": {
+        "label": "사용자 질문",
+        "color": "#22c55e",
+        "description": "검색할 질문",
+        "config": {
+          "value": "{{question}}",
+          "type": "text"
+        }
+      }
+    },
+    {
+      "id": "embed_query",
+      "type": "llm.embed",
+      "position": { "x": 300, "y": 350 },
+      "data": {
+        "label": "쿼리 임베딩",
+        "color": "#8b5cf6",
+        "description": "질문을 벡터로 변환",
+        "config": {
+          "provider": "",
+          "model": ""
+        }
+      }
+    },
+    {
+      "id": "vector_search",
+      "type": "storage.vector-search",
+      "position": { "x": 550, "y": 350 },
+      "data": {
+        "label": "벡터 검색",
+        "color": "#06b6d4",
+        "description": "관련 청크 검색 (Top-K)",
+        "config": {
+          "collection": "rag_docs",
+          "top_k": 5,
+          "threshold": 0.7
+        }
+      }
+    },
+    {
+      "id": "prompt_template",
+      "type": "prompt.template",
+      "position": { "x": 800, "y": 350 },
+      "data": {
+        "label": "RAG 프롬프트",
+        "color": "#ec4899",
+        "description": "검색 결과 + 질문 → 프롬프트 구성",
+        "config": {
+          "template": "다음 참고 문서를 기반으로 질문에 정확히 답변하세요.\n\n## 참고 문서\n{{context}}\n\n## 질문\n{{question}}\n\n## 답변\n근거를 포함하여 답변하세요:"
+        }
+      }
+    },
+    {
+      "id": "llm_chat",
+      "type": "llm.chat",
+      "position": { "x": 1050, "y": 350 },
+      "data": {
+        "label": "LLM 답변",
+        "color": "#6366f1",
+        "description": "Claude/GPT로 답변 생성",
+        "config": {
+          "provider": "",
+          "model": "",
+          "temperature": 0.3,
+          "maxTokens": 2048,
+          "systemPrompt": "당신은 주어진 문서를 기반으로 정확한 답변을 제공하는 전문 리서치 어시스턴트입니다."
+        }
+      }
+    },
+    {
+      "id": "result_view",
+      "type": "viz.text",
+      "position": { "x": 1300, "y": 350 },
+      "data": {
+        "label": "결과 표시",
+        "color": "#10b981",
+        "description": "답변 결과 시각화",
+        "config": {
+          "title": "RAG 답변 결과"
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "file_read", "target": "text_split", "sourceHandle": "text", "targetHandle": "text" },
+    { "id": "e2", "source": "text_split", "target": "embed_chunks", "sourceHandle": "chunks", "targetHandle": "text" },
+    { "id": "e3", "source": "embed_chunks", "target": "vector_store", "sourceHandle": "embeddings", "targetHandle": "embeddings" },
+    { "id": "e4", "source": "query_input", "target": "embed_query", "sourceHandle": "output", "targetHandle": "text" },
+    { "id": "e5", "source": "embed_query", "target": "vector_search", "sourceHandle": "embedding", "targetHandle": "query_embedding" },
+    { "id": "e6", "source": "vector_search", "target": "prompt_template", "sourceHandle": "results", "targetHandle": "context" },
+    { "id": "e7", "source": "query_input", "target": "prompt_template", "sourceHandle": "output", "targetHandle": "question" },
+    { "id": "e8", "source": "prompt_template", "target": "llm_chat", "sourceHandle": "text", "targetHandle": "prompt" },
+    { "id": "e9", "source": "llm_chat", "target": "result_view", "sourceHandle": "text", "targetHandle": "text" }
+  ]
+}

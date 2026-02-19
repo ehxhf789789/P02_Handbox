@@ -1,0 +1,183 @@
+{
+  "version": "2.0.0",
+  "id": "v2-multistep-agent",
+  "meta": {
+    "name": "Multi-step AI Agent",
+    "description": "LLM이 구조화된 출력으로 다음 작업을 결정하고, 조건 분기를 통해 적절한 도구를 실행한 뒤 결과를 피드백하는 멀티스텝 에이전트.",
+    "author": "Handbox",
+    "tags": ["agent", "structured", "conditional", "loop", "tier1"],
+    "category": "agent",
+    "createdAt": "2026-02-20T00:00:00Z",
+    "updatedAt": "2026-02-20T00:00:00Z"
+  },
+  "variables": [
+    {
+      "key": "task",
+      "label": "작업 지시",
+      "type": "text",
+      "default": "주어진 URL에서 데이터를 가져와 핵심 내용을 요약하고, 키워드를 추출하세요.",
+      "description": "에이전트에게 전달할 작업 지시사항"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "task_input",
+      "type": "data.constant",
+      "position": { "x": 50, "y": 250 },
+      "data": {
+        "label": "작업 입력",
+        "color": "#22c55e",
+        "description": "에이전트에게 전달할 작업",
+        "config": {
+          "value": "{{task}}",
+          "type": "text"
+        }
+      }
+    },
+    {
+      "id": "agent_decide",
+      "type": "llm.structured",
+      "position": { "x": 300, "y": 250 },
+      "data": {
+        "label": "에이전트 판단",
+        "color": "#6366f1",
+        "description": "다음 작업을 구조화된 JSON으로 결정",
+        "config": {
+          "provider": "",
+          "model": "",
+          "temperature": 0.2,
+          "maxTokens": 1024,
+          "systemPrompt": "당신은 작업을 단계별로 수행하는 AI 에이전트입니다. 다음 중 하나의 action을 선택하세요.",
+          "schema": "{\n  \"action\": \"fetch_url | extract_text | summarize | extract_keywords | done\",\n  \"params\": {},\n  \"reasoning\": \"string\"\n}"
+        }
+      }
+    },
+    {
+      "id": "json_parse",
+      "type": "transform.json-query",
+      "position": { "x": 550, "y": 250 },
+      "data": {
+        "label": "액션 추출",
+        "color": "#8b5cf6",
+        "description": "구조화된 응답에서 action 필드 추출",
+        "config": {
+          "query": "action"
+        }
+      }
+    },
+    {
+      "id": "action_switch",
+      "type": "control.switch",
+      "position": { "x": 800, "y": 250 },
+      "data": {
+        "label": "액션 분기",
+        "color": "#f59e0b",
+        "description": "action 값에 따라 적절한 도구로 분기",
+        "config": {
+          "cases": "fetch_url,extract_text,summarize"
+        }
+      }
+    },
+    {
+      "id": "http_fetch",
+      "type": "io.http-request",
+      "position": { "x": 1100, "y": 80 },
+      "data": {
+        "label": "URL 가져오기",
+        "color": "#3b82f6",
+        "description": "웹 페이지 데이터 가져오기",
+        "config": {
+          "method": "GET",
+          "timeout_ms": 30000,
+          "response_type": "text"
+        }
+      }
+    },
+    {
+      "id": "text_regex",
+      "type": "transform.text-regex",
+      "position": { "x": 1100, "y": 250 },
+      "data": {
+        "label": "텍스트 추출",
+        "color": "#f59e0b",
+        "description": "HTML에서 본문 텍스트 추출",
+        "config": {
+          "pattern": "<p[^>]*>(.*?)</p>",
+          "operation": "match_all",
+          "flags": "is"
+        }
+      }
+    },
+    {
+      "id": "summarize_llm",
+      "type": "llm.chat",
+      "position": { "x": 1100, "y": 420 },
+      "data": {
+        "label": "요약 생성",
+        "color": "#6366f1",
+        "description": "텍스트를 요약",
+        "config": {
+          "provider": "",
+          "model": "",
+          "temperature": 0.3,
+          "maxTokens": 2048,
+          "systemPrompt": "주어진 텍스트를 3문장 이내로 핵심만 요약하세요."
+        }
+      }
+    },
+    {
+      "id": "merge_results",
+      "type": "control.merge",
+      "position": { "x": 1400, "y": 250 },
+      "data": {
+        "label": "결과 병합",
+        "color": "#64748b",
+        "description": "각 도구의 결과를 병합",
+        "config": {
+          "mode": "first_available"
+        }
+      }
+    },
+    {
+      "id": "result_log",
+      "type": "debug.log",
+      "position": { "x": 1650, "y": 250 },
+      "data": {
+        "label": "결과 로그",
+        "color": "#ef4444",
+        "description": "에이전트 실행 결과 로깅",
+        "config": {
+          "label": "Agent Result",
+          "level": "info"
+        }
+      }
+    },
+    {
+      "id": "final_view",
+      "type": "viz.json",
+      "position": { "x": 1900, "y": 250 },
+      "data": {
+        "label": "결과 뷰어",
+        "color": "#10b981",
+        "description": "에이전트 최종 결과 시각화",
+        "config": {
+          "title": "에이전트 실행 결과",
+          "expandDepth": 3
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "task_input", "target": "agent_decide", "sourceHandle": "output", "targetHandle": "prompt" },
+    { "id": "e2", "source": "agent_decide", "target": "json_parse", "sourceHandle": "result", "targetHandle": "data" },
+    { "id": "e3", "source": "json_parse", "target": "action_switch", "sourceHandle": "result", "targetHandle": "value" },
+    { "id": "e4", "source": "action_switch", "target": "http_fetch", "sourceHandle": "case_1", "targetHandle": "url" },
+    { "id": "e5", "source": "action_switch", "target": "text_regex", "sourceHandle": "case_2", "targetHandle": "text" },
+    { "id": "e6", "source": "action_switch", "target": "summarize_llm", "sourceHandle": "case_3", "targetHandle": "prompt" },
+    { "id": "e7", "source": "http_fetch", "target": "merge_results", "sourceHandle": "body", "targetHandle": "input_1" },
+    { "id": "e8", "source": "text_regex", "target": "merge_results", "sourceHandle": "result", "targetHandle": "input_2" },
+    { "id": "e9", "source": "summarize_llm", "target": "merge_results", "sourceHandle": "text", "targetHandle": "input_3" },
+    { "id": "e10", "source": "merge_results", "target": "result_log", "sourceHandle": "output", "targetHandle": "data" },
+    { "id": "e11", "source": "result_log", "target": "final_view", "sourceHandle": "data", "targetHandle": "data" }
+  ]
+}

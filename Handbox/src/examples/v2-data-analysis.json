@@ -1,0 +1,136 @@
+{
+  "version": "2.0.0",
+  "id": "v2-data-analysis",
+  "meta": {
+    "name": "Data Analysis Pipeline",
+    "description": "Excel/CSV 문서를 파싱하여 JSON 쿼리로 데이터를 추출하고, 템플릿으로 분석 보고서를 구성한 뒤 LLM으로 인사이트를 생성하는 파이프라인.",
+    "author": "Handbox",
+    "tags": ["data", "analysis", "excel", "csv", "json", "llm", "tier1"],
+    "category": "analysis",
+    "createdAt": "2026-02-20T00:00:00Z",
+    "updatedAt": "2026-02-20T00:00:00Z"
+  },
+  "nodes": [
+    {
+      "id": "doc_parse",
+      "type": "doc.parse",
+      "position": { "x": 50, "y": 200 },
+      "data": {
+        "label": "문서 파싱",
+        "color": "#f59e0b",
+        "description": "Excel/CSV 파일을 구조화된 데이터로 파싱",
+        "config": {
+          "path": "",
+          "extract_images": false
+        }
+      }
+    },
+    {
+      "id": "json_query_summary",
+      "type": "transform.json-query",
+      "position": { "x": 300, "y": 100 },
+      "data": {
+        "label": "요약 통계 추출",
+        "color": "#8b5cf6",
+        "description": "전체 데이터에서 요약 통계를 추출",
+        "config": {
+          "query": "rows[*].amount | sum"
+        }
+      }
+    },
+    {
+      "id": "json_query_filter",
+      "type": "transform.json-query",
+      "position": { "x": 300, "y": 300 },
+      "data": {
+        "label": "조건부 필터",
+        "color": "#8b5cf6",
+        "description": "특정 조건의 데이터를 필터링",
+        "config": {
+          "query": "rows[?amount > 10000]"
+        }
+      }
+    },
+    {
+      "id": "merge_results",
+      "type": "control.merge",
+      "position": { "x": 550, "y": 200 },
+      "data": {
+        "label": "결과 병합",
+        "color": "#64748b",
+        "description": "요약 통계와 필터 결과를 합침",
+        "config": {
+          "mode": "object",
+          "keys": "summary,filtered"
+        }
+      }
+    },
+    {
+      "id": "template",
+      "type": "transform.text-template",
+      "position": { "x": 800, "y": 200 },
+      "data": {
+        "label": "분석 보고서 템플릿",
+        "color": "#ec4899",
+        "description": "데이터를 분석 보고서 형태로 구성",
+        "config": {
+          "template": "## 데이터 분석 보고서\n\n### 요약 통계\n총 합계: {{summary}}\n\n### 상위 항목 (10,000 초과)\n{{#each filtered}}  - {{this.name}}: {{this.amount}}\n{{/each}}\n\n위 데이터를 바탕으로 트렌드와 인사이트를 분석해주세요."
+        }
+      }
+    },
+    {
+      "id": "llm_analysis",
+      "type": "llm.chat",
+      "position": { "x": 1050, "y": 200 },
+      "data": {
+        "label": "AI 분석",
+        "color": "#6366f1",
+        "description": "LLM이 데이터 인사이트를 생성",
+        "config": {
+          "provider": "",
+          "model": "",
+          "temperature": 0.5,
+          "maxTokens": 4096,
+          "systemPrompt": "당신은 데이터 분석 전문가입니다. 주어진 데이터를 분석하고, 트렌드, 이상치, 핵심 인사이트를 도출하세요."
+        }
+      }
+    },
+    {
+      "id": "table_view",
+      "type": "viz.table",
+      "position": { "x": 300, "y": 500 },
+      "data": {
+        "label": "데이터 테이블",
+        "color": "#10b981",
+        "description": "원본 데이터를 테이블로 표시",
+        "config": {
+          "title": "원본 데이터",
+          "pageSize": 20
+        }
+      }
+    },
+    {
+      "id": "text_view",
+      "type": "viz.text",
+      "position": { "x": 1300, "y": 200 },
+      "data": {
+        "label": "분석 결과",
+        "color": "#10b981",
+        "description": "AI 분석 결과 표시",
+        "config": {
+          "title": "데이터 분석 인사이트"
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "doc_parse", "target": "json_query_summary", "sourceHandle": "structured_data", "targetHandle": "data" },
+    { "id": "e2", "source": "doc_parse", "target": "json_query_filter", "sourceHandle": "structured_data", "targetHandle": "data" },
+    { "id": "e3", "source": "json_query_summary", "target": "merge_results", "sourceHandle": "result", "targetHandle": "input_1" },
+    { "id": "e4", "source": "json_query_filter", "target": "merge_results", "sourceHandle": "result", "targetHandle": "input_2" },
+    { "id": "e5", "source": "merge_results", "target": "template", "sourceHandle": "output", "targetHandle": "data" },
+    { "id": "e6", "source": "template", "target": "llm_analysis", "sourceHandle": "text", "targetHandle": "prompt" },
+    { "id": "e7", "source": "llm_analysis", "target": "text_view", "sourceHandle": "text", "targetHandle": "text" },
+    { "id": "e8", "source": "doc_parse", "target": "table_view", "sourceHandle": "structured_data", "targetHandle": "data" }
+  ]
+}

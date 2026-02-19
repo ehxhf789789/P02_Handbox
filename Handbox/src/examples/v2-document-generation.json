@@ -1,0 +1,135 @@
+{
+  "version": "2.0.0",
+  "id": "v2-document-generation",
+  "meta": {
+    "name": "Batch Document Generation",
+    "description": "디렉토리의 문서 목록을 순회하며 각각 파싱 → 템플릿 적용 → LLM 요약 → 결과 파일 저장. forEach 루프를 활용한 배치 문서 생성 파이프라인.",
+    "author": "Handbox",
+    "tags": ["batch", "document", "forEach", "generation", "tier1"],
+    "category": "generation",
+    "createdAt": "2026-02-20T00:00:00Z",
+    "updatedAt": "2026-02-20T00:00:00Z"
+  },
+  "variables": [
+    {
+      "key": "input_dir",
+      "label": "입력 디렉토리",
+      "type": "text",
+      "default": "./documents",
+      "description": "처리할 문서가 있는 디렉토리 경로"
+    },
+    {
+      "key": "output_dir",
+      "label": "출력 디렉토리",
+      "type": "text",
+      "default": "./summaries",
+      "description": "요약 결과를 저장할 디렉토리 경로"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "file_list",
+      "type": "io.file-list",
+      "position": { "x": 50, "y": 200 },
+      "data": {
+        "label": "파일 목록",
+        "color": "#3b82f6",
+        "description": "디렉토리 내 문서 파일 목록 조회",
+        "config": {
+          "path": "{{input_dir}}",
+          "pattern": "**/*.{pdf,docx,txt,md,xlsx}",
+          "recursive": true,
+          "sort_by": "name"
+        }
+      }
+    },
+    {
+      "id": "forEach_docs",
+      "type": "control.forEach",
+      "position": { "x": 300, "y": 200 },
+      "data": {
+        "label": "문서 순회",
+        "color": "#f59e0b",
+        "description": "각 문서를 순차 처리",
+        "config": {}
+      }
+    },
+    {
+      "id": "doc_parse",
+      "type": "doc.parse",
+      "position": { "x": 550, "y": 100 },
+      "data": {
+        "label": "문서 파싱",
+        "color": "#f59e0b",
+        "description": "현재 문서를 텍스트로 변환",
+        "config": {}
+      }
+    },
+    {
+      "id": "template",
+      "type": "transform.text-template",
+      "position": { "x": 550, "y": 300 },
+      "data": {
+        "label": "요약 프롬프트",
+        "color": "#ec4899",
+        "description": "문서 내용으로 요약 프롬프트 구성",
+        "config": {
+          "template": "다음 문서의 내용을 구조화된 요약 보고서로 작성하세요.\n\n## 문서 정보\n- 파일명: {{filename}}\n- 형식: {{format}}\n\n## 문서 내용\n{{content}}\n\n## 요약 보고서\n1. 핵심 내용 (3줄 이내)\n2. 주요 키워드 (5개)\n3. 카테고리 분류\n4. 중요도 (상/중/하)"
+        }
+      }
+    },
+    {
+      "id": "llm_summarize",
+      "type": "llm.chat",
+      "position": { "x": 850, "y": 200 },
+      "data": {
+        "label": "AI 요약",
+        "color": "#6366f1",
+        "description": "LLM이 문서를 분석하고 요약 생성",
+        "config": {
+          "provider": "",
+          "model": "",
+          "temperature": 0.3,
+          "maxTokens": 2048,
+          "systemPrompt": "당신은 문서 분석 전문가입니다. 주어진 문서를 정확히 분석하고 구조화된 요약을 작성하세요."
+        }
+      }
+    },
+    {
+      "id": "file_write",
+      "type": "io.file-write",
+      "position": { "x": 1100, "y": 200 },
+      "data": {
+        "label": "결과 저장",
+        "color": "#3b82f6",
+        "description": "요약 결과를 파일로 저장",
+        "config": {
+          "encoding": "utf-8",
+          "mode": "overwrite",
+          "create_dirs": true
+        }
+      }
+    },
+    {
+      "id": "stats_view",
+      "type": "viz.stats",
+      "position": { "x": 550, "y": 500 },
+      "data": {
+        "label": "처리 통계",
+        "color": "#10b981",
+        "description": "배치 처리 통계 표시",
+        "config": {
+          "title": "문서 생성 통계"
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "file_list", "target": "forEach_docs", "sourceHandle": "files", "targetHandle": "array" },
+    { "id": "e2", "source": "forEach_docs", "target": "doc_parse", "sourceHandle": "item", "targetHandle": "path" },
+    { "id": "e3", "source": "doc_parse", "target": "template", "sourceHandle": "text", "targetHandle": "content" },
+    { "id": "e4", "source": "template", "target": "llm_summarize", "sourceHandle": "text", "targetHandle": "prompt" },
+    { "id": "e5", "source": "llm_summarize", "target": "file_write", "sourceHandle": "text", "targetHandle": "content" },
+    { "id": "e6", "source": "forEach_docs", "target": "stats_view", "sourceHandle": "results", "targetHandle": "data" }
+  ]
+}

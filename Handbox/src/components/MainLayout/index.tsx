@@ -52,6 +52,12 @@ import sampleReportGenerator from '../../examples/sample-report-generator.json'
 import sampleDataExtraction from '../../examples/sample-data-extraction.json'
 import sampleFaqChatbot from '../../examples/sample-faq-chatbot.json'
 import sampleEmailAutomation from '../../examples/sample-email-automation.json'
+// v2 Tier 1/2/3 기준 파이프라인
+import v2BasicRag from '../../examples/v2-basic-rag.json'
+import v2DataAnalysis from '../../examples/v2-data-analysis.json'
+import v2MultistepAgent from '../../examples/v2-multistep-agent.json'
+import v2DocumentGeneration from '../../examples/v2-document-generation.json'
+import v2PluginIntegration from '../../examples/v2-plugin-integration.json'
 import WorkflowEditor from '../WorkflowEditor'
 
 // 샘플 워크플로우 목록 - 핵심 기능만 유지
@@ -78,6 +84,12 @@ const SAMPLE_WORKFLOWS = [
   { id: 'code-review', name: 'AI 코드 리뷰', data: sampleCodeReview, icon: '👨‍💻', category: '분석' },
   // AWS
   { id: 's3-bedrock', name: 'S3-Bedrock 분석', data: sampleS3BedrockPipeline, icon: '☁️', category: 'AWS' },
+  // v2 기준 파이프라인
+  { id: 'v2-rag', name: 'Basic RAG Pipeline', data: v2BasicRag as any, icon: '🔍', category: 'v2 Pipeline' },
+  { id: 'v2-data', name: 'Data Analysis', data: v2DataAnalysis as any, icon: '📊', category: 'v2 Pipeline' },
+  { id: 'v2-agent', name: 'Multi-step Agent', data: v2MultistepAgent as any, icon: '🤖', category: 'v2 Pipeline' },
+  { id: 'v2-docgen', name: 'Document Generation', data: v2DocumentGeneration as any, icon: '📄', category: 'v2 Pipeline' },
+  { id: 'v2-plugin', name: 'Plugin Integration', data: v2PluginIntegration as any, icon: '🔌', category: 'v2 Pipeline' },
 ]
 import PropertyPanel from '../PropertyPanel'
 import { useAppStore } from '../../stores/appStore'
@@ -317,8 +329,10 @@ function MainLayoutContent() {
 
   const handleLoadSampleWorkflow = (sample: typeof SAMPLE_WORKFLOWS[0]) => {
     setCurrentWorkflowId(null)
-    setWorkflowName(sample.data.name)
-    setWorkflowDescription(sample.data.description)
+    // v2 포맷 (meta.name) 또는 레거시 포맷 (name) 지원
+    const d = sample.data as any
+    setWorkflowName(d.meta?.name ?? d.name ?? sample.name)
+    setWorkflowDescription(d.meta?.description ?? d.description ?? '')
     setNodes(sample.data.nodes.map((n: any) => ({
       id: n.id,
       type: n.type,
@@ -601,7 +615,7 @@ function MainLayoutContent() {
           ) : (
             <Box sx={{ p: 2 }}>
               {/* 샘플 워크플로우 목록 - 카테고리별 */}
-              {['건설신기술', '기본', '문서처리', 'RAG', '자동화', '분석', '한국API', 'AWS'].map((category) => {
+              {['v2 Pipeline', '건설신기술', '기본', '문서처리', 'RAG', '자동화', '분석', '한국API', 'AWS'].map((category) => {
                 const categoryWorkflows = SAMPLE_WORKFLOWS.filter((w) => w.category === category)
                 if (categoryWorkflows.length === 0) return null
                 return (
