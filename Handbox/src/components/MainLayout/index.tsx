@@ -24,11 +24,16 @@ import UploadFileIcon from '@mui/icons-material/UploadFile'
 import FileDownloadIcon from '@mui/icons-material/FileDownload'
 import LogoutIcon from '@mui/icons-material/Logout'
 import PersonIcon from '@mui/icons-material/Person'
+import BugReportIcon from '@mui/icons-material/BugReport'
+import StorefrontIcon from '@mui/icons-material/Storefront'
 
 import { serializeWorkflow, downloadWorkflow, parseWorkflowJSON, deserializeWorkflow } from '../../utils/workflowSerializer'
 import NodePalette from '../NodePalette'
 import AISettingsDialog from '../AISettingsDialog'
 import MCPSettingsDialog from '../MCPSettingsDialog'
+import PluginManagerDialog from '../PluginManagerDialog'
+import ExecutionDebugger from '../ExecutionDebugger'
+import type { DebugLogEntry } from '../ExecutionDebugger'
 import { clearSavedCredentials } from '../ProviderSetup'
 import sampleRagWorkflow from '../../examples/sample-rag-workflow.json'
 import sampleTextGenWorkflow from '../../examples/sample-text-generation.json'
@@ -107,6 +112,10 @@ function MainLayoutContent() {
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false)
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false)
   const [mcpSettingsOpen, setMcpSettingsOpen] = useState(false)
+  const [pluginsOpen, setPluginsOpen] = useState(false)
+  const [debuggerOpen, setDebuggerOpen] = useState(false)
+  const [debugLogs, setDebugLogs] = useState<DebugLogEntry[]>([])
+  const [debugVariables, setDebugVariables] = useState<Record<string, any>>({})
 
   // 현재 워크플로우
   const [currentWorkflowId, setCurrentWorkflowId] = useState<string | null>(null)
@@ -179,13 +188,33 @@ function MainLayoutContent() {
       return
     }
 
+    // 디버그 로그 초기화
+    setDebugLogs([])
+    setDebugVariables({})
+
     setExecuting(true)
     try {
       // 새 ExecutionEngine으로 실행 (NodeRegistry 기반)
       await runWorkflow(nodes, edges)
 
-      // 실행 완료 후 결과를 출력 노드에 반영
+      // 디버그 로그 수집
       const execResults = useExecutionStore.getState().nodeExecutionResults
+      const newLogs: DebugLogEntry[] = Object.entries(execResults).map(([nodeId, result]) => {
+        const node = nodes.find(n => n.id === nodeId)
+        return {
+          nodeId,
+          nodeName: node?.data?.label || node?.type || nodeId,
+          nodeType: node?.type || 'unknown',
+          status: result.status,
+          timestamp: result.startTime || Date.now(),
+          output: result.output,
+          error: result.error,
+          duration: result.duration,
+        }
+      })
+      setDebugLogs(newLogs)
+
+      // 실행 완료 후 결과를 출력 노드에 반영
       const outputNode = nodes.find((n) => n.type === 'output')
       if (outputNode) {
         // 출력 노드에 연결된 소스 노드의 결과를 가져옴
@@ -431,6 +460,18 @@ function MainLayoutContent() {
           <Tooltip title="MCP 확장">
             <IconButton onClick={() => setMcpSettingsOpen(true)} sx={{ color: 'rgba(255,255,255,0.7)', '&:hover': { color: '#fff', background: 'rgba(255,255,255,0.1)' } }}>
               <ExtensionIcon />
+            </IconButton>
+          </Tooltip>
+
+          <Tooltip title="플러그인 관리">
+            <IconButton onClick={() => setPluginsOpen(true)} sx={{ color: 'rgba(255,255,255,0.7)', '&:hover': { color: '#fff', background: 'rgba(255,255,255,0.1)' } }}>
+              <StorefrontIcon />
+            </IconButton>
+          </Tooltip>
+
+          <Tooltip title="실행 디버거">
+            <IconButton onClick={() => setDebuggerOpen(!debuggerOpen)} sx={{ color: debuggerOpen ? '#6366f1' : 'rgba(255,255,255,0.7)', '&:hover': { color: '#fff', background: 'rgba(255,255,255,0.1)' } }}>
+              <BugReportIcon />
             </IconButton>
           </Tooltip>
 
@@ -779,6 +820,18 @@ function MainLayoutContent() {
 
       {/* MCP Settings Dialog */}
       <MCPSettingsDialog open={mcpSettingsOpen} onClose={() => setMcpSettingsOpen(false)} />
+
+      {/* Plugin Manager Dialog */}
+      <PluginManagerDialog open={pluginsOpen} onClose={() => setPluginsOpen(false)} />
+
+      {/* Execution Debugger (Bottom Drawer) */}
+      <ExecutionDebugger
+        open={debuggerOpen}
+        onClose={() => setDebuggerOpen(false)}
+        logs={debugLogs}
+        variables={debugVariables}
+        isRunning={executing || isWorkflowRunning}
+      />
 
     </Box>
   )

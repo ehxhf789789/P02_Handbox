@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Box, Typography, Accordion, AccordionSummary, AccordionDetails, Chip, TextField, InputAdornment, Tabs, Tab, Tooltip } from '@mui/material'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import SmartToyIcon from '@mui/icons-material/SmartToy'
@@ -203,9 +203,19 @@ export default function NodePalette() {
   const { useAWSConnection, awsStatus } = useAppStore()
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState(0)
+  const [registryVersion, setRegistryVersion] = useState(0)
+
+  // NodeRegistry 변경 구독 (플러그인 설치/제거 시 자동 업데이트)
+  useEffect(() => {
+    const unsubscribe = NodeRegistry.subscribe(() => {
+      setRegistryVersion(v => v + 1)
+    })
+    return unsubscribe
+  }, [])
 
   // Registry에서 추가 노드 가져오기 (하드코딩에 없는 것만)
-  const registryExtraNodes = useMemo(() => getRegistryOnlyNodes(), [])
+  // registryVersion이 변경되면 재계산 (NodeRegistry 변경 시)
+  const registryExtraNodes = useMemo(() => getRegistryOnlyNodes(), [registryVersion])
   const allNodesWithRegistry = useMemo(() => [...ALL_NODES, ...registryExtraNodes], [registryExtraNodes])
 
   // Registry 기반 카테고리 (레거시 노드 + Registry 전용 노드를 카테고리별 병합)
@@ -261,7 +271,7 @@ export default function NodePalette() {
     }
 
     return result
-  }, [registryExtraNodes])
+  }, [registryExtraNodes, registryVersion])
 
   // 인증 상태 확인 헬퍼
   const isAuthMet = (authRequired?: AuthRequirement): boolean => {

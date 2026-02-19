@@ -4,12 +4,21 @@ import ReactDOM from 'react-dom/client'
 // ===== 앱 초기화: App import 전에 실행 필수 =====
 import { registerBuiltinExecutors } from './executors'
 import { registerBuiltinProviders } from './providers'
-import { registerBuiltinPlugins } from './plugins'
+import { registerBuiltinPlugins, initializePluginSystem } from './plugins'
+import { registerAllTools } from './tools'
 
 // NodeRegistry에 먼저 등록해야 WorkflowEditor가 정상 작동
 registerBuiltinExecutors()
 registerBuiltinProviders()
 registerBuiltinPlugins()
+
+// Tier 1 도구 시스템 등록 (52개 내장 노드)
+registerAllTools()
+
+// Tier 2 플러그인 시스템 비동기 초기화 (설치된 플러그인 복원)
+initializePluginSystem().catch(err =>
+  console.warn('[Plugins] 플러그인 시스템 초기화 실패:', err)
+)
 
 // ===== App import는 초기화 이후 =====
 import App from './App'

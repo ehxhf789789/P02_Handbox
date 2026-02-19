@@ -13,5 +13,15 @@ pub mod data_loader;
 pub mod local_storage;
 pub mod vector_store;
 
+// === Tier 1 도구 시스템 ===
+pub mod tool_io;
+pub mod tool_transform;
+pub mod tool_storage;
+pub mod tool_doc;
+pub mod tool_process;
+
+// === Tier 2 플러그인 시스템 ===
+pub mod plugin_manager;
+
 #[cfg(test)]
 mod workflow_test;

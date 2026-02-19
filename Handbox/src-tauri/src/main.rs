@@ -9,6 +9,7 @@
 mod commands;
 mod aws;
 mod agents;
+mod tools;
 
 use tauri::Manager;
 
@@ -108,6 +109,56 @@ fn main() {
             commands::vector_store::vector_text_search,
             commands::vector_store::vector_hybrid_search,
             commands::vector_store::vector_delete_index,
+
+            // ═══════════════════════════════════════
+            // Tier 1 도구 시스템 — 새 커맨드
+            // ═══════════════════════════════════════
+
+            // IO 도구
+            commands::tool_io::tool_file_read,
+            commands::tool_io::tool_file_write,
+            commands::tool_io::tool_file_list,
+            commands::tool_io::tool_file_info,
+            commands::tool_io::tool_http_request,
+
+            // Transform 도구
+            commands::tool_transform::tool_json_query,
+            commands::tool_transform::tool_json_parse,
+            commands::tool_transform::tool_json_stringify,
+            commands::tool_transform::tool_csv_parse,
+            commands::tool_transform::tool_csv_stringify,
+            commands::tool_transform::tool_text_split,
+            commands::tool_transform::tool_text_regex,
+            commands::tool_transform::tool_text_template,
+            commands::tool_transform::tool_xml_parse,
+
+            // Storage 도구
+            commands::tool_storage::tool_kv_set,
+            commands::tool_storage::tool_kv_get,
+            commands::tool_storage::tool_kv_delete,
+            commands::tool_storage::tool_kv_list,
+            commands::tool_storage::tool_vector_store,
+            commands::tool_storage::tool_vector_search,
+            commands::tool_storage::tool_vector_hybrid_search,
+            commands::tool_storage::tool_sqlite_query,
+            commands::tool_storage::tool_sqlite_schema,
+
+            // Document 도구
+            commands::tool_doc::tool_doc_parse,
+            commands::tool_doc::tool_doc_convert,
+
+            // Process 도구
+            commands::tool_process::tool_shell_exec,
+            commands::tool_process::tool_code_eval,
+
+            // ═══════════════════════════════════════
+            // Tier 2 플러그인 시스템
+            // ═══════════════════════════════════════
+            commands::plugin_manager::plugin_install,
+            commands::plugin_manager::plugin_uninstall,
+            commands::plugin_manager::plugin_list,
+            commands::plugin_manager::plugin_list_available,
+            commands::plugin_manager::plugin_update_manifest,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

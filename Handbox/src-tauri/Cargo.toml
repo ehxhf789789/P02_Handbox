@@ -51,6 +51,26 @@ quick-xml = "0.37"                                     # XML 처리 개선
 # 로컬 저장소 (Phase 3)
 rusqlite = { version = "0.32", features = ["bundled"] }  # SQLite 임베디드
 
+# === Tier 1 도구 시스템 ===
+# 인코딩 감지/변환
+encoding_rs = "0.8"
+
+# 파일 타입 감지
+infer = "0.16"
+
+# 파일 탐색
+glob = "0.3"
+walkdir = "2"
+
+# HTML 파싱
+scraper = "0.20"
+
+# 정규식
+regex = "1"
+
+# base64 인코딩 (바이너리 파일 전달용)
+base64 = "0.22"
+
 # AWS SDK HTTP 클라이언트 - native-tls 사용 (Windows 시스템 인증서)
 aws-smithy-runtime = { version = "1.7", features = ["client", "connector-hyper-0-14-x"] }
 hyper = { version = "0.14", features = ["client", "http1", "http2", "tcp"] }
