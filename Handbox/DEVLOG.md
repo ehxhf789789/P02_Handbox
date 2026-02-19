@@ -22,32 +22,46 @@
 
 ### 다음 작업
 
+- [ ] **노드 렌더링 완전 해결** - data.file-loader 타입이 여전히 누락될 수 있음
 - [ ] AWS Bedrock 연결 테스트 (Claude 모델 호출)
 - [ ] 파일 로드 → 텍스트 추출 → LLM 분석 파이프라인 테스트
 - [ ] 로컬 저장소 (SQLite) 연동 테스트
+
+### 현재 이슈 (2025-02-19 세션 종료 시점)
+
+**노드 렌더링 문제가 완전히 해결되지 않음:**
+- ES 모듈 호이스팅으로 인해 main.tsx에서 executor 등록 전에 모듈이 로드됨
+- useMemo로 nodeTypes 생성을 컴포넌트 렌더링 시점으로 이동했으나 여전히 문제 발생 가능
+- **해결 방안**: nodeTypes에 모든 필요한 타입을 하드코딩하거나, 동적 import 사용
 
 ### 참고 사항
 
 - 타 환경에서 개발 시 `npm install` 후 `npm run tauri dev` 실행
 - AWS 자격 증명은 앱 시작 시 설정하거나 건너뛸 수 있음
 - 노드가 제대로 렌더링되지 않으면 브라우저 localStorage 클리어 필요
+- 콘솔에서 `[WorkflowEditor] nodeTypes 생성 완료: XX개 타입` 확인
 
 ---
 
 ## Architecture Decisions
 
-### Node Type Registration Flow
+### Node Type Registration Flow (현재)
 
 ```
 main.tsx
-  ├── registerBuiltinExecutors()  ← NodeRegistry 채움
-  ├── registerBuiltinProviders()
-  ├── registerBuiltinPlugins()
-  └── import App
+  ├── import { registerBuiltinExecutors }  ← 모듈 호이스팅됨
+  ├── registerBuiltinExecutors()           ← 실행
+  └── import App                           ← 이미 로드됨 (문제!)
         └── MainLayout
               └── WorkflowEditor
-                    └── registerAllNodeTypes()  ← NodeRegistry에서 가져옴
+                    └── useMemo(() => nodeTypes)  ← 렌더링 시 생성
 ```
+
+### 권장 수정 방향
+
+1. **하드코딩 방식**: 모든 노드 타입을 WorkflowEditor에 직접 명시
+2. **동적 import**: `await import('./executors')` 사용
+3. **Context 기반**: nodeTypes를 Context로 전달
 
 ### 확장성 설계
 
