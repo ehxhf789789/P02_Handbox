@@ -6,7 +6,6 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
-use tokio::sync::oneshot;
 use lazy_static::lazy_static;
 
 // ========================================
@@ -394,8 +393,42 @@ pub async fn mcp_list_servers() -> Result<Vec<MCPServerStatus>, String> {
 // 내부 헬퍼 함수
 // ========================================
 
-/// MCP 서버에 JSON-RPC 요청 전송
+/// MCP 요청 타임아웃 (초)
+const MCP_REQUEST_TIMEOUT_SECS: u64 = 60;
+
+/// MCP 서버에 JSON-RPC 요청 전송 (타임아웃 포함)
 async fn send_mcp_request(
+    server_id: &str,
+    method: &str,
+    params: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    use std::time::Duration;
+    use tokio::time::timeout;
+
+    let server_id = server_id.to_string();
+    let method = method.to_string();
+    let method_for_error = method.clone(); // 에러 메시지용 복사본
+
+    // 블로킹 I/O를 별도 스레드에서 실행하고 타임아웃 적용
+    let result = timeout(
+        Duration::from_secs(MCP_REQUEST_TIMEOUT_SECS),
+        tokio::task::spawn_blocking(move || {
+            send_mcp_request_blocking(&server_id, &method, params)
+        })
+    ).await;
+
+    match result {
+        Ok(Ok(inner_result)) => inner_result,
+        Ok(Err(e)) => Err(format!("MCP task panicked: {}", e)),
+        Err(_) => Err(format!(
+            "MCP request timed out after {} seconds. Method: {}",
+            MCP_REQUEST_TIMEOUT_SECS, method_for_error
+        )),
+    }
+}
+
+/// MCP 서버에 JSON-RPC 요청 전송 (블로킹 버전 - spawn_blocking에서 호출)
+fn send_mcp_request_blocking(
     server_id: &str,
     method: &str,
     params: serde_json::Value,
@@ -428,16 +461,19 @@ async fn send_mcp_request(
     stdin.flush()
         .map_err(|e| format!("Failed to flush stdin: {}", e))?;
 
-    // stdout에서 응답 읽기
+    // stdout에서 응답 읽기 (spawn_blocking 내에서 실행되므로 tokio 런타임 블로킹 안됨)
     let stdout = instance.process.stdout.as_mut()
         .ok_or("stdout not available")?;
 
     let mut reader = BufReader::new(stdout);
     let mut response_line = String::new();
 
-    // 응답 대기 (타임아웃 없는 동기 버전)
     reader.read_line(&mut response_line)
         .map_err(|e| format!("Failed to read response: {}", e))?;
+
+    if response_line.is_empty() {
+        return Err("MCP server returned empty response".to_string());
+    }
 
     let response: JsonRpcResponse = serde_json::from_str(&response_line)
         .map_err(|e| format!("Failed to parse response: {} - raw: {}", e, response_line))?;

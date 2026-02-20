@@ -22,7 +22,10 @@ import ApiIcon from '@mui/icons-material/Api'
 import BarChartIcon from '@mui/icons-material/BarChart'
 import PowerOffIcon from '@mui/icons-material/PowerOff'
 import StopCircleIcon from '@mui/icons-material/StopCircle'
-import { useWorkflowStore, NodeExecutionStatus } from '../stores/workflowStore'
+import { useWorkflowStore } from '../stores/workflowStore'
+import { useExecutionStore } from '../stores/executionStore'
+import { useDragStore } from '../stores/dragStore'
+import type { NodeExecutionStatus } from '../engine/types'
 
 interface GenericNodeData {
   label: string
@@ -212,12 +215,35 @@ const formatOutput = (output: string | Record<string, any> | undefined): string 
     if (output.result_type) lines.push(`유형: ${output.result_type}`)
   }
 
+  // 텍스트 출력 (viz.text, LLM 결과 등)
+  if (output.text && lines.length === 0) {
+    const text = String(output.text)
+    return text.length > 200 ? text.slice(0, 200) + '...' : text
+  }
+
+  // 요약 출력
+  if (output.summary && lines.length === 0) {
+    const summary = String(output.summary)
+    return summary.length > 200 ? summary.slice(0, 200) + '...' : summary
+  }
+
+  // LLM 응답
+  if (output.response && lines.length === 0) {
+    const response = String(output.response)
+    return response.length > 200 ? response.slice(0, 200) + '...' : response
+  }
+
+  // 결과
+  if (output.result && typeof output.result === 'string' && lines.length === 0) {
+    return output.result.length > 200 ? output.result.slice(0, 200) + '...' : output.result
+  }
+
   // 일반 상태
   if (output.status && lines.length === 0) {
     lines.push(`상태: ${output.status}`)
   }
 
-  return lines.length > 0 ? lines.join('\n') : JSON.stringify(output).slice(0, 80)
+  return lines.length > 0 ? lines.join('\n') : JSON.stringify(output).slice(0, 100) + '...'
 }
 
 function GenericNode({ data, selected, type, id }: NodeProps<GenericNodeData>) {
@@ -227,8 +253,8 @@ function GenericNode({ data, selected, type, id }: NodeProps<GenericNodeData>) {
   const hasConfig = data.config && Object.keys(data.config).length > 0
   const isDisabled = data.enabled === false
 
-  // 실행 상태 가져오기
-  const executionResult = useWorkflowStore((state) => state.nodeExecutionResults[id])
+  // 실행 상태 가져오기 (executionStore에서 가져옴)
+  const executionResult = useExecutionStore((state) => state.nodeExecutionResults[id])
   const executionStatus: NodeExecutionStatus = executionResult?.status || 'idle'
   const executionOutput = executionResult?.output
   const executionDuration = executionResult?.duration
@@ -237,8 +263,19 @@ function GenericNode({ data, selected, type, id }: NodeProps<GenericNodeData>) {
   const breakpointNodeId = useWorkflowStore((state) => state.breakpointNodeId)
   const isBreakpoint = breakpointNodeId === id
 
+  // 드래그 중 호환 노드 하이라이트
+  const { isDragging, compatibleNodes } = useDragStore()
+  const compatibleSide = isDragging ? compatibleNodes.get(id) : null
+  const isCompatibleInput = compatibleSide === 'input' || compatibleSide === 'both'
+  const isCompatibleOutput = compatibleSide === 'output' || compatibleSide === 'both'
+  const isCompatible = isCompatibleInput || isCompatibleOutput
+
   // 상태별 배경 글로우
   const getStatusGlow = () => {
+    // 호환 노드 하이라이트가 우선
+    if (isCompatible) {
+      return '0 0 25px rgba(34, 197, 94, 0.6)'
+    }
     switch (executionStatus) {
       case 'running': return '0 0 20px rgba(251, 191, 36, 0.5)'
       case 'completed': return '0 0 15px rgba(34, 197, 94, 0.3)'
@@ -252,19 +289,21 @@ function GenericNode({ data, selected, type, id }: NodeProps<GenericNodeData>) {
       sx={{
         background: isDisabled ? '#111827' : '#1e293b',
         borderRadius: 2,
-        border: executionStatus === 'running'
-          ? '2px solid #fbbf24'
-          : executionStatus === 'completed'
-            ? '2px solid #22c55e'
-            : executionStatus === 'error'
-              ? '2px solid #ef4444'
-              : isBreakpoint
-                ? '2px dashed #f97316'
-                : selected
-                  ? `2px solid ${data.color}`
-                  : isDisabled
-                    ? '2px dashed rgba(107, 114, 128, 0.5)'
-                    : '1px solid rgba(255,255,255,0.1)',
+        border: isCompatible
+          ? '2px solid #22c55e'
+          : executionStatus === 'running'
+            ? '2px solid #fbbf24'
+            : executionStatus === 'completed'
+              ? '2px solid #22c55e'
+              : executionStatus === 'error'
+                ? '2px solid #ef4444'
+                : isBreakpoint
+                  ? '2px dashed #f97316'
+                  : selected
+                    ? `2px solid ${data.color}`
+                    : isDisabled
+                      ? '2px dashed rgba(107, 114, 128, 0.5)'
+                      : '1px solid rgba(255,255,255,0.1)',
         boxShadow: getStatusGlow(),
         minWidth: 180,
         maxWidth: 240,
@@ -288,10 +327,12 @@ function GenericNode({ data, selected, type, id }: NodeProps<GenericNodeData>) {
         type="target"
         position={Position.Left}
         style={{
-          background: data.color,
-          width: 10,
-          height: 10,
-          border: '2px solid #0f172a',
+          background: isCompatibleInput ? '#22c55e' : data.color,
+          width: isCompatibleInput ? 14 : 10,
+          height: isCompatibleInput ? 14 : 10,
+          border: isCompatibleInput ? '3px solid #fff' : '2px solid #0f172a',
+          boxShadow: isCompatibleInput ? '0 0 12px #22c55e' : 'none',
+          transition: 'all 0.2s ease',
         }}
       />
 
@@ -556,10 +597,12 @@ function GenericNode({ data, selected, type, id }: NodeProps<GenericNodeData>) {
         type="source"
         position={Position.Right}
         style={{
-          background: data.color,
-          width: 10,
-          height: 10,
-          border: '2px solid #0f172a',
+          background: isCompatibleOutput ? '#22c55e' : data.color,
+          width: isCompatibleOutput ? 14 : 10,
+          height: isCompatibleOutput ? 14 : 10,
+          border: isCompatibleOutput ? '3px solid #fff' : '2px solid #0f172a',
+          boxShadow: isCompatibleOutput ? '0 0 12px #22c55e' : 'none',
+          transition: 'all 0.2s ease',
         }}
       />
     </Box>

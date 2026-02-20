@@ -15,7 +15,7 @@ export const JsonQueryDefinition: NodeDefinition = {
     tags: ['json', 'query', 'jsonpath', 'filter', 'extract', '쿼리', '추출', '필터'],
   },
   ports: {
-    inputs: [{ name: 'data', type: 'json', required: true, description: '입력 JSON 데이터' }],
+    inputs: [{ name: 'data', type: 'any', required: true, description: '입력 JSON 데이터 (텍스트도 자동 파싱)' }],
     outputs: [{ name: 'result', type: 'json', required: true, description: '쿼리 결과' }],
   },
   configSchema: [
@@ -25,7 +25,17 @@ export const JsonQueryDefinition: NodeDefinition = {
   runtime: 'tauri',
   executor: {
     async execute(input, config) {
-      const data = input.data || input.text ? JSON.parse(input.text) : {}
+      // 입력 데이터 처리: JSON 객체 또는 텍스트 (자동 파싱)
+      let data: any
+      if (input.data && typeof input.data === 'object') {
+        data = input.data
+      } else if (input.data && typeof input.data === 'string') {
+        data = JSON.parse(input.data)
+      } else if (input.text) {
+        data = JSON.parse(input.text)
+      } else {
+        throw new Error('입력 데이터가 필요합니다 (data 또는 text)')
+      }
       const result = await invoke('tool_json_query', { data, query: config.query }) as any
       return { result }
     },
@@ -190,13 +200,67 @@ export const TextSplitDefinition: NodeDefinition = {
   runtime: 'tauri',
   executor: {
     async execute(input, config) {
+      console.log(`[text-split] 입력 데이터:`, {
+        hasInputText: !!input.text,
+        inputTextLength: input.text?.length || 0,
+        predecessorCount: input._predecessors?.length || 0,
+      })
+
+      // 입력 텍스트 추출 (여러 소스에서 시도)
+      let text = input.text
+      let textSource = 'input.text'
+
+      if (!text && input._predecessors?.length > 0) {
+        // 선행 노드에서 텍스트 추출
+        for (const pred of input._predecessors) {
+          if (pred?.text) {
+            text = pred.text
+            textSource = '_predecessors[].text'
+            break
+          } else if (pred?.content) {
+            text = pred.content
+            textSource = '_predecessors[].content'
+            break
+          }
+        }
+      }
+
+      console.log(`[text-split] 텍스트 소스: ${textSource}, 길이: ${text?.length || 0}자`)
+
+      if (!text) {
+        console.error('[text-split] 분할할 텍스트가 없습니다. input:', Object.keys(input))
+        return {
+          error: '분할할 텍스트가 없습니다.',
+          chunks: [],
+          chunks_created: 0,
+        }
+      }
+
+      // 기본값 보장
+      const method = config.method || 'recursive'
+      const chunkSize = config.chunk_size || 1000
+      const chunkOverlap = config.chunk_overlap || 200
+
+      console.log(`[text-split] 분할 설정: method=${method}, chunkSize=${chunkSize}, overlap=${chunkOverlap}`)
+
       const result = await invoke('tool_text_split', {
-        text: input.text, method: config.method, chunkSize: config.chunk_size,
-        chunkOverlap: config.chunk_overlap, separator: config.separator,
-        preserveSentences: config.preserve_sentences,
+        text,
+        method,
+        chunkSize,
+        chunkOverlap,
+        separator: config.separator || null,
+        preserveSentences: config.preserve_sentences ?? true,
       }) as any
-      const chunks = result.chunks.map((c: any) => c.text)
-      return { chunks, result }
+
+      const chunks = result.chunks?.map((c: any) => c.text || c) || []
+      console.log(`[text-split] 분할 완료: ${chunks.length}개 청크 생성`)
+
+      return {
+        chunks,
+        chunks_created: chunks.length,
+        text: chunks.join('\n---\n'),
+        result,
+      }
     },
   },
 }

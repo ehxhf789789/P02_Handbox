@@ -552,7 +552,7 @@ const getNodeDescription = (type: string) => {
 
 function PropertyPanelContent() {
   // Shallow 선택자로 필요한 상태만 구독
-  const { selectedNode, updateNode, deleteNode, setSelectedNode, addNode, toggleNodeEnabled, toggleBreakpoint, breakpointNodeId, saveKnowledgeBaseLocal } = useWorkflowStore(
+  const { selectedNode, updateNode, deleteNode, setSelectedNode, addNode, toggleNodeEnabled, toggleBreakpoint, breakpointNodeId, saveKnowledgeBaseLocal, nodeExecutionResults } = useWorkflowStore(
     (state) => ({
       selectedNode: state.selectedNode,
       updateNode: state.updateNode,
@@ -563,9 +563,13 @@ function PropertyPanelContent() {
       toggleBreakpoint: state.toggleBreakpoint,
       breakpointNodeId: state.breakpointNodeId,
       saveKnowledgeBaseLocal: state.saveKnowledgeBaseLocal,
+      nodeExecutionResults: state.nodeExecutionResults,
     }),
     shallow
   )
+
+  // 현재 선택된 노드의 실행 결과
+  const executionResult = selectedNode ? nodeExecutionResults[selectedNode.id] : null
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<string | null>(null)
 
@@ -2488,6 +2492,113 @@ function PropertyPanelContent() {
         <Box sx={{ mt: 2, p: 2, borderRadius: 1, background: testResult.includes('✅') ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)' }}>
           <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>{testResult}</Typography>
         </Box>
+      )}
+
+      {/* Execution Result - 실행 결과 표시 */}
+      {executionResult && (
+        <Accordion
+          defaultExpanded
+          sx={{
+            mt: 2,
+            background: executionResult.status === 'completed'
+              ? 'rgba(34, 197, 94, 0.08)'
+              : executionResult.status === 'error'
+                ? 'rgba(239, 68, 68, 0.08)'
+                : 'rgba(251, 191, 36, 0.08)',
+            border: `1px solid ${
+              executionResult.status === 'completed'
+                ? 'rgba(34, 197, 94, 0.3)'
+                : executionResult.status === 'error'
+                  ? 'rgba(239, 68, 68, 0.3)'
+                  : 'rgba(251, 191, 36, 0.3)'
+            }`,
+            borderRadius: '8px !important',
+            '&:before': { display: 'none' },
+          }}
+        >
+          <AccordionSummary
+            expandIcon={<ExpandMoreIcon sx={{ color: 'grey.400' }} />}
+            sx={{ minHeight: 40 }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography variant="subtitle2" sx={{
+                color: executionResult.status === 'completed' ? '#4ade80'
+                     : executionResult.status === 'error' ? '#f87171'
+                     : '#fbbf24',
+                fontWeight: 600
+              }}>
+                실행 결과
+              </Typography>
+              <Chip
+                size="small"
+                label={
+                  executionResult.status === 'completed' ? '완료'
+                  : executionResult.status === 'error' ? '오류'
+                  : executionResult.status === 'running' ? '실행 중'
+                  : '대기'
+                }
+                sx={{
+                  height: 18,
+                  fontSize: '0.65rem',
+                  background: executionResult.status === 'completed'
+                    ? 'rgba(34, 197, 94, 0.2)'
+                    : executionResult.status === 'error'
+                      ? 'rgba(239, 68, 68, 0.2)'
+                      : 'rgba(251, 191, 36, 0.2)',
+                  color: executionResult.status === 'completed' ? '#4ade80'
+                       : executionResult.status === 'error' ? '#f87171'
+                       : '#fbbf24',
+                }}
+              />
+              {executionResult.duration && (
+                <Typography variant="caption" color="grey.500">
+                  {(executionResult.duration / 1000).toFixed(2)}s
+                </Typography>
+              )}
+            </Box>
+          </AccordionSummary>
+          <AccordionDetails sx={{ pt: 0 }}>
+            {executionResult.error && (
+              <Alert severity="error" sx={{ mb: 2, fontSize: '0.75rem' }}>
+                {executionResult.error}
+              </Alert>
+            )}
+            {executionResult.output && (
+              <Box
+                sx={{
+                  background: 'rgba(0, 0, 0, 0.3)',
+                  borderRadius: 1,
+                  p: 1.5,
+                  maxHeight: 300,
+                  overflow: 'auto',
+                  '&::-webkit-scrollbar': { width: 6 },
+                  '&::-webkit-scrollbar-thumb': { background: 'rgba(255,255,255,0.2)', borderRadius: 3 },
+                }}
+              >
+                <Box
+                  component="pre"
+                  sx={{
+                    m: 0,
+                    fontFamily: 'monospace',
+                    fontSize: '0.75rem',
+                    color: '#86efac',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                  }}
+                >
+                  {typeof executionResult.output === 'object'
+                    ? JSON.stringify(executionResult.output, null, 2)
+                    : String(executionResult.output)}
+                </Box>
+              </Box>
+            )}
+            {!executionResult.output && !executionResult.error && (
+              <Typography variant="caption" color="grey.500">
+                출력 데이터 없음
+              </Typography>
+            )}
+          </AccordionDetails>
+        </Accordion>
       )}
 
       {/* Node Info */}

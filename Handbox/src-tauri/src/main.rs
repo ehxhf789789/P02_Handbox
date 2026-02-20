@@ -159,6 +159,12 @@ fn main() {
             commands::plugin_manager::plugin_list,
             commands::plugin_manager::plugin_list_available,
             commands::plugin_manager::plugin_update_manifest,
+
+            // ═══════════════════════════════════════
+            // 테스트 및 검증 시스템
+            // ═══════════════════════════════════════
+            commands::workflow_stress_test::run_workflow_stress_test,
+            commands::workflow_stress_test::run_node_compatibility_test,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

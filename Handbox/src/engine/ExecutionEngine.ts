@@ -117,14 +117,14 @@ function collectInputs(
 
   const inputs: Record<string, any> = {}
 
-  if (inputPorts.length === 0 || incomingEdges.length === 0) {
-    // 포트가 없거나 입력 엣지가 없으면 — 선행 노드 출력을 배열로 전달 (레거시 호환)
-    const predecessorOutputs = incomingEdges
-      .map(e => context.nodeOutputs[e.source])
-      .filter(Boolean)
+  // 선행 노드 출력 수집 (모든 경우에 필요)
+  const predecessorOutputs = incomingEdges
+    .map(e => context.nodeOutputs[e.source])
+    .filter(Boolean)
+  inputs._predecessors = predecessorOutputs
 
-    inputs._predecessors = predecessorOutputs
-    // 첫 번째 선행 노드의 출력을 기본 입력으로
+  if (inputPorts.length === 0 || incomingEdges.length === 0) {
+    // 포트가 없거나 입력 엣지가 없으면 — 선행 노드 출력을 기본 입력으로
     if (predecessorOutputs.length > 0) {
       Object.assign(inputs, predecessorOutputs[0])
     }
@@ -134,27 +134,76 @@ function collectInputs(
   // 포트 기반 입력 수집
   for (const edge of incomingEdges) {
     const sourceOutput = context.nodeOutputs[edge.source]
-    if (sourceOutput) {
-      // sourceHandle/targetHandle이 있으면 포트 매핑
-      if (edge.targetHandle && edge.sourceHandle) {
-        inputs[edge.targetHandle] = sourceOutput[edge.sourceHandle]
-      } else {
-        // 없으면 전체 출력을 첫 번째 포트에 매핑
-        const firstPort = inputPorts[0]
-        if (firstPort) {
-          inputs[firstPort.name] = sourceOutput[firstPort.name]
-            || sourceOutput.text
-            || sourceOutput.file
-            || sourceOutput
+    if (!sourceOutput) continue
+
+    // sourceHandle/targetHandle이 있으면 포트 매핑
+    if (edge.targetHandle && edge.sourceHandle) {
+      inputs[edge.targetHandle] = sourceOutput[edge.sourceHandle]
+    } else {
+      // 핸들이 없으면: 소스 출력을 타겟 입력 포트들에 스마트 매핑
+      for (const inputPort of inputPorts) {
+        // 이미 값이 설정되어 있으면 스킵
+        if (inputs[inputPort.name] !== undefined) continue
+
+        // 1. 동일 이름의 출력 포트가 있는지 확인
+        if (sourceOutput[inputPort.name] !== undefined) {
+          inputs[inputPort.name] = sourceOutput[inputPort.name]
+          continue
         }
+
+        // 2. 타입 기반 매핑 시도
+        const portType = inputPort.type
+        if (portType === 'text' || portType === 'llm-response') {
+          // 텍스트 타입: text, content, response, prompt 순서로 시도
+          const textValue = sourceOutput.text
+            || sourceOutput.content
+            || sourceOutput.response
+            || sourceOutput.prompt
+            || (typeof sourceOutput === 'string' ? sourceOutput : null)
+          if (textValue) {
+            inputs[inputPort.name] = textValue
+            continue
+          }
+        } else if (portType === 'json' || portType === 'any') {
+          // JSON 타입: data, result, json 순서로 시도
+          const jsonValue = sourceOutput.data
+            || sourceOutput.result
+            || sourceOutput.json
+            || sourceOutput
+          inputs[inputPort.name] = jsonValue
+          continue
+        } else if (portType === 'text[]') {
+          // 텍스트 배열: chunks 또는 texts
+          const arrayValue = sourceOutput.chunks || sourceOutput.texts
+          if (Array.isArray(arrayValue)) {
+            inputs[inputPort.name] = arrayValue
+            continue
+          }
+        }
+      }
+
+      // 3. 첫 번째 입력 포트에 기본값 설정 (아직 없는 경우)
+      const firstInputPort = inputPorts[0]
+      if (firstInputPort && inputs[firstInputPort.name] === undefined) {
+        const outputValue = sourceOutput.text
+          || sourceOutput.data
+          || sourceOutput.result
+          || sourceOutput.content
+          || sourceOutput.response
+          || Object.values(sourceOutput).find(v => typeof v === 'string' && v.length > 0)
+          || sourceOutput
+
+        inputs[firstInputPort.name] = outputValue
       }
     }
   }
 
-  // _predecessors도 항상 포함 (레거시 호환)
-  inputs._predecessors = incomingEdges
-    .map(e => context.nodeOutputs[e.source])
-    .filter(Boolean)
+  // 디버깅 로그
+  console.log(`[collectInputs] Node ${nodeId} (${node.type}):`, {
+    inputPorts: inputPorts.map(p => p.name),
+    collectedInputs: Object.keys(inputs).filter(k => k !== '_predecessors'),
+    hasText: inputs.text !== undefined || inputs.prompt !== undefined,
+  })
 
   return inputs
 }
@@ -224,12 +273,27 @@ async function executeSingleNode(
   const inputs = collectInputs(node.id, node, edges, context)
   const config = node.data?.config || {}
 
+  // 디버그 로깅: 노드 실행 시작
+  console.log(`[ExecutionEngine] 노드 실행 시작: ${node.id} (${nodeType})`)
+  console.log(`[ExecutionEngine] 입력:`, {
+    inputKeys: Object.keys(inputs).filter(k => k !== '_predecessors'),
+    hasText: !!inputs.text || !!inputs.prompt,
+    textLength: (inputs.text?.length || 0) + (inputs.prompt?.length || 0),
+    config: Object.keys(config),
+  })
+
   if (executor) {
     // 루프 노드인 경우 → 서브실행 컨텍스트 제공
     if (LOOP_NODE_TYPES.has(nodeType)) {
       return executeLoopNode(node, executor, inputs, config, edges, allNodes, context, onNodeStatusChange)
     }
-    return executor.execute(inputs, config, context)
+    const result = await executor.execute(inputs, config, context)
+    console.log(`[ExecutionEngine] 노드 실행 완료: ${node.id}`, {
+      outputKeys: Object.keys(result),
+      hasText: !!result.text,
+      textLength: result.text?.length || 0,
+    })
+    return result
   }
 
   return executeLegacyNode(node, inputs, config, context)

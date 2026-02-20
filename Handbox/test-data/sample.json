@@ -1,0 +1,12 @@
+{
+  "title": "Tier 1 도구 테스트",
+  "items": [
+    { "id": 1, "name": "파일 읽기", "status": "ready" },
+    { "id": 2, "name": "JSON 쿼리", "status": "ready" },
+    { "id": 3, "name": "텍스트 청킹", "status": "ready" }
+  ],
+  "metadata": {
+    "created": "2024-02-20",
+    "version": "2.0"
+  }
+}

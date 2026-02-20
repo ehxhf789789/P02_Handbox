@@ -288,11 +288,13 @@ pub fn chunk_recursive(
     for (i, part) in parts.iter().enumerate() {
         let mut chunk_text = part.clone();
 
-        // overlap: 이전 청크 끝부분 추가
+        // overlap: 이전 청크 끝부분 추가 (UTF-8 문자 경계 존중)
         if i > 0 && chunk_overlap > 0 {
             let prev = &parts[i - 1];
-            let overlap_chars = chunk_overlap.min(prev.len());
-            let overlap_text = &prev[prev.len() - overlap_chars..];
+            let prev_chars: Vec<char> = prev.chars().collect();
+            let overlap_char_count = chunk_overlap.min(prev_chars.len());
+            let overlap_start = prev_chars.len().saturating_sub(overlap_char_count);
+            let overlap_text: String = prev_chars[overlap_start..].iter().collect();
             chunk_text = format!("{}{}", overlap_text, chunk_text);
         }
 
@@ -302,11 +304,11 @@ pub fn chunk_recursive(
             text: chunk_text.clone(),
             index: chunks.len(),
             start_char: start,
-            end_char: start + chunk_text.len(),
+            end_char: start + chunk_text.chars().count(),
             token_count_approx: approx_token_count(&chunk_text),
         });
 
-        char_pos += part.len();
+        char_pos += part.chars().count();
     }
 
     chunks
@@ -335,19 +337,21 @@ fn merge_into_chunks(
             format!("{}\n{}", current, section)
         };
 
-        if candidate.len() > chunk_size && !current.is_empty() {
+        if candidate.chars().count() > chunk_size && !current.is_empty() {
             // 현재 청크 저장
             chunks.push(Chunk {
                 text: current.clone(),
                 index: chunks.len(),
                 start_char: current_start,
-                end_char: current_start + current.len(),
+                end_char: current_start + current.chars().count(),
                 token_count_approx: approx_token_count(&current),
             });
 
-            // overlap
-            if chunk_overlap > 0 && current.len() > chunk_overlap {
-                let overlap = &current[current.len() - chunk_overlap..];
+            // overlap (UTF-8 문자 경계 존중)
+            let current_chars: Vec<char> = current.chars().collect();
+            if chunk_overlap > 0 && current_chars.len() > chunk_overlap {
+                let overlap_start = current_chars.len().saturating_sub(chunk_overlap);
+                let overlap: String = current_chars[overlap_start..].iter().collect();
                 current = format!("{}\n{}", overlap, section);
                 current_start = char_pos.saturating_sub(chunk_overlap);
             } else {
@@ -370,7 +374,7 @@ fn merge_into_chunks(
             text: current.clone(),
             index: chunks.len(),
             start_char: current_start,
-            end_char: current_start + current.len(),
+            end_char: current_start + current.chars().count(),
             token_count_approx: approx_token_count(&current),
         });
     }

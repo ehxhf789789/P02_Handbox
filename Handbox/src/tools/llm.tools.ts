@@ -42,12 +42,54 @@ export const LlmChatDefinition: NodeDefinition = {
       const providerId = config.provider || context.defaultLLMProvider
       const provider = ProviderRegistry.getLLMProvider(providerId)
 
+      console.log(`[LLM.chat] 입력 데이터:`, {
+        hasPrompt: !!input.prompt,
+        hasText: !!input.text,
+        hasContent: !!input.content,
+        inputKeys: Object.keys(input).filter(k => k !== '_predecessors'),
+        predecessorCount: input._predecessors?.length || 0,
+      })
+
+      // 입력에서 텍스트 추출 (다양한 소스 지원)
+      let inputText = input.prompt || input.text || input.content || ''
+      let textSource = input.prompt ? 'input.prompt' : input.text ? 'input.text' : input.content ? 'input.content' : 'none'
+
+      // _predecessors에서 텍스트 추출 시도 (직접 연결 시)
+      if (!inputText && input._predecessors?.length > 0) {
+        console.log(`[LLM.chat] _predecessors에서 텍스트 검색 중...`, input._predecessors.map((p: any) => ({
+          hasText: !!p?.text,
+          hasContent: !!p?.content,
+          hasChunks: !!p?.chunks,
+          keys: p ? Object.keys(p) : [],
+        })))
+
+        for (const pred of input._predecessors) {
+          if (pred?.text) {
+            inputText = pred.text
+            textSource = '_predecessors[].text'
+            break
+          } else if (pred?.content) {
+            inputText = pred.content
+            textSource = '_predecessors[].content'
+            break
+          } else if (pred?.chunks && Array.isArray(pred.chunks)) {
+            // 청크 배열인 경우 결합
+            inputText = pred.chunks.map((c: any) => typeof c === 'string' ? c : c.content || c.text || '').join('\n\n')
+            textSource = '_predecessors[].chunks'
+            break
+          }
+        }
+      }
+
+      console.log(`[LLM.chat] 텍스트 소스: ${textSource}, 길이: ${inputText?.length || 0}자`)
+
       // 프롬프트 조립
-      let prompt = input.prompt || ''
+      let prompt = inputText
       if (config.prompt_template) {
         prompt = config.prompt_template
-          .replace('{{prompt}}', input.prompt || '')
+          .replace('{{prompt}}', inputText)
           .replace('{{context}}', input.context || '')
+          .replace('{{text}}', inputText)
       }
       const systemPrompt = input.system || config.system_prompt || ''
       if (input.context && !config.prompt_template) {
@@ -55,8 +97,15 @@ export const LlmChatDefinition: NodeDefinition = {
       }
 
       if (!provider) {
-        throw new Error(`LLM 프로바이더 '${providerId}'를 찾을 수 없습니다.`)
+        throw new Error(`LLM 프로바이더 '${providerId}'를 찾을 수 없습니다. 설정에서 프로바이더가 올바르게 구성되어 있는지 확인하세요.`)
       }
+
+      if (!prompt || prompt.trim() === '') {
+        console.error('[LLM.chat] 프롬프트가 비어있음. input:', Object.keys(input), '_predecessors:', input._predecessors?.map((p: any) => Object.keys(p || {})))
+        throw new Error('프롬프트가 비어있습니다. 이전 노드에서 텍스트가 전달되지 않았습니다.')
+      }
+
+      console.log(`[LLM.chat] 프롬프트 준비 완료: ${prompt.length}자, 프로바이더: ${providerId}, 모델: ${config.model}`)
 
       const response = await provider.invoke({
         model: config.model,

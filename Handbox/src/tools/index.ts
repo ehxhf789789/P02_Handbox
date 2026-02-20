@@ -1,7 +1,7 @@
 /**
  * Tier 1 도구 등록 — 모든 내장 도구 노드를 NodeRegistry에 등록
  *
- * 52개 노드를 10개 카테고리로 조직:
+ * 72개 노드를 14개 카테고리로 조직:
  * - IO (5): file.read, file.write, file.list, file.info, http.request
  * - Transform (9): json.query, json.parse, json.stringify, csv.parse, csv.stringify,
  *                   text.split, text.regex, text.template, xml.parse
@@ -13,6 +13,11 @@
  * - Debug (3): log, inspect, breakpoint
  * - Viz (5): table, chart, json, text, stats
  * - LLM (6): llm.chat, llm.embed, llm.structured, prompt.template, prompt.fewshot, prompt.chain
+ * - Vision (4): vision.analyze, vision.compare, vision.extract, vision.ocr-advanced
+ * - VLM (4): vlm.experiment, vlm.benchmark, vlm.prompt-optimizer, vlm.dataset-builder
+ * - Agent (4): agent.react, agent.tool-use, agent.multi, agent.planner
+ * - ML (4): ml.classify, ml.cluster, ml.regression, ml.feature-engineering
+ * - Export (4): export.docx, export.pptx, export.pdf, export.xlsx
  */
 
 import { NodeRegistry } from '../registry/NodeRegistry'
@@ -28,12 +33,18 @@ import { VARIABLE_DEFINITIONS } from './variable.tools'
 import { DEBUG_DEFINITIONS } from './debug.tools'
 import { VIZ_DEFINITIONS } from './viz.tools'
 import { LLM_DEFINITIONS } from './llm.tools'
+import { VISION_DEFINITIONS } from './vision.tools'
+import { VLM_DEFINITIONS } from './vlm.tools'
+import { AGENT_DEFINITIONS } from './agent.tools'
+import { ML_DEFINITIONS } from './ml.tools'
+import { EXPORT_DEFINITIONS } from './export.tools'
 
 // ============================================================
 // Tier 1 도구 카테고리 정의
 // ============================================================
 
 export const TIER1_CATEGORIES = [
+  // Core Data Pipeline
   { id: 'io',        label: 'IO',            icon: 'FolderOpen',    order: 10, defaultExpanded: true },
   { id: 'transform', label: 'Transform',     icon: 'Transform',     order: 11, defaultExpanded: true },
   { id: 'storage',   label: 'Storage',       icon: 'Storage',       order: 12, defaultExpanded: true },
@@ -43,7 +54,11 @@ export const TIER1_CATEGORIES = [
   { id: 'data',      label: 'Data',          icon: 'DataObject',    order: 16, defaultExpanded: true },
   { id: 'debug',     label: 'Debug',         icon: 'BugReport',     order: 17, defaultExpanded: false },
   { id: 'viz',       label: 'Visualization', icon: 'BarChart',      order: 18, defaultExpanded: true },
+  // AI & ML
   { id: 'llm',       label: 'LLM',           icon: 'Psychology',    order: 19, defaultExpanded: true },
+  { id: 'ai',        label: 'AI/Vision/Agent', icon: 'AutoAwesome', order: 20, defaultExpanded: true },
+  // Export
+  { id: 'export',    label: 'Export',        icon: 'Download',      order: 21, defaultExpanded: true },
 ]
 
 // ============================================================
@@ -61,6 +76,11 @@ export const TIER1_DEFINITIONS: NodeDefinition[] = [
   ...DEBUG_DEFINITIONS,
   ...VIZ_DEFINITIONS,
   ...LLM_DEFINITIONS,
+  ...VISION_DEFINITIONS,
+  ...VLM_DEFINITIONS,
+  ...AGENT_DEFINITIONS,
+  ...ML_DEFINITIONS,
+  ...EXPORT_DEFINITIONS,
 ]
 
 // ============================================================
@@ -97,3 +117,8 @@ export { VARIABLE_DEFINITIONS } from './variable.tools'
 export { DEBUG_DEFINITIONS } from './debug.tools'
 export { VIZ_DEFINITIONS } from './viz.tools'
 export { LLM_DEFINITIONS } from './llm.tools'
+export { VISION_DEFINITIONS } from './vision.tools'
+export { VLM_DEFINITIONS } from './vlm.tools'
+export { AGENT_DEFINITIONS } from './agent.tools'
+export { ML_DEFINITIONS } from './ml.tools'
+export { EXPORT_DEFINITIONS } from './export.tools'

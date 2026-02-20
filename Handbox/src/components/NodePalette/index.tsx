@@ -45,6 +45,7 @@ import { NODE_TEMPLATES, TEMPLATE_CATEGORIES } from '../../data/nodeTemplates'
 import { NodeRegistry } from '../../registry/NodeRegistry'
 import { getIcon } from '../../utils/iconMap'
 import type { NodeDefinition } from '../../registry/NodeDefinition'
+import { calculateCompatibleNodesMap } from '../../services/ConnectionGuideService'
 
 // 템플릿 아이콘 이름 → React 컴포넌트 매핑
 const TEMPLATE_ICON_MAP: Record<string, React.ReactNode> = {
@@ -198,8 +199,8 @@ function getRegistryOnlyNodes(): NodeTypeConfig[] {
 }
 
 export default function NodePalette() {
-  const { startDrag, updatePosition } = useDragStore()
-  const { addTemplate } = useWorkflowStore()
+  const { startDrag, updatePosition, setCompatibleNodes } = useDragStore()
+  const { addTemplate, nodes } = useWorkflowStore()
   const { useAWSConnection, awsStatus } = useAppStore()
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState(0)
@@ -315,6 +316,11 @@ export default function NodePalette() {
   const handleMouseDown = (e: React.MouseEvent, node: NodeTypeConfig) => {
     e.preventDefault()
     console.log('Starting drag:', node.type)
+
+    // 호환 노드 계산 및 설정
+    const compatibleMap = calculateCompatibleNodesMap(node.type, nodes)
+    setCompatibleNodes(compatibleMap)
+    console.log('[ConnectionGuide] 호환 노드:', compatibleMap.size, '개')
 
     startDrag({
       type: node.type,

@@ -64,12 +64,6 @@ import { StatsViewerDefinition } from './viz/StatsViewerExecutor'
 // === Extension Stubs (NEW) ===
 import { AzureCLIDefinition, GCPCLIDefinition, CustomCLIDefinition } from './extension/CLIExtensionExecutor'
 
-// === MCP ===
-import { MCPToolDefinition } from './mcp/MCPToolExecutor'
-
-// === MCP 동적 노드 ===
-import { MCP_CATEGORIES, syncMCPToolsToRegistry, initializeMCPNodeSync } from '../adapters/mcp'
-
 // ============================================================
 // 내장 노드 정의 목록
 // ============================================================
@@ -132,9 +126,6 @@ export const BUILTIN_DEFINITIONS: NodeDefinition[] = [
   AzureCLIDefinition,
   GCPCLIDefinition,
   CustomCLIDefinition,
-
-  // MCP
-  MCPToolDefinition,
 ]
 
 // ============================================================
@@ -231,16 +222,8 @@ export function registerBuiltinExecutors(): void {
     }
   }
 
-  // 3. MCP 카테고리 등록
-  for (const category of MCP_CATEGORIES) {
-    NodeRegistry.registerCategory(category)
-  }
-
-  // 4. 기존 MCP 서버 도구 동기화 (연결된 서버가 있으면)
-  syncMCPToolsToRegistry()
-
-  // 5. MCP 서버 상태 변경 시 자동 노드 등록/해제 구독
-  initializeMCPNodeSync()
+  // Note: MCP 플러그인은 별도의 PluginStore/PluginToNode 시스템으로 관리됨
+  // (src/plugins/PluginToNode.ts 참조)
 
   console.log(`[Executors] ${BUILTIN_DEFINITIONS.length}개 내장 노드 + ${Object.keys(LEGACY_TYPE_MAP).length}개 레거시 별칭 등록 완료`)
 }
@@ -295,10 +278,4 @@ export {
   AzureCLIDefinition,
   GCPCLIDefinition,
   CustomCLIDefinition,
-  // MCP
-  MCPToolDefinition,
 }
-
-// MCP 관련 유틸리티 re-export
-export { syncMCPToolsToRegistry, initializeMCPNodeSync, MCP_CATEGORIES } from '../adapters/mcp'
-export { getMCPServerOptions, getMCPToolOptions } from './mcp/MCPToolExecutor'

@@ -30,7 +30,7 @@ export type DataType =
 
 /** 데이터 타입 간 호환성 매트릭스 */
 export const TYPE_COMPATIBILITY: Record<DataType, DataType[]> = {
-  'text':             ['text', 'any'],
+  'text':             ['text', 'json', 'any'],  // text → json 허용 (파싱 가능)
   'text[]':           ['text[]', 'any'],
   'file-ref':         ['file-ref', 'text', 'any'],
   'file-ref[]':       ['file-ref[]', 'any'],

@@ -33,10 +33,24 @@ export const DocParseDefinition: NodeDefinition = {
   executor: {
     async execute(input, config) {
       const path = input.path || config.path
+      console.log(`[doc.parse] 문서 파싱 시작: ${path}`)
+
+      if (!path) {
+        throw new Error('파일 경로가 지정되지 않았습니다. config.path 또는 input.path를 확인하세요.')
+      }
+
       const result = await invoke('tool_doc_parse', {
         path, maxChars: config.max_chars || null,
         sheetIndex: config.sheet_index, ocr: config.ocr,
       }) as any
+
+      const textLength = result.text?.length || 0
+      console.log(`[doc.parse] 문서 파싱 완료: ${textLength}자 추출`, result.metadata)
+
+      if (textLength === 0) {
+        console.warn(`[doc.parse] 경고: 추출된 텍스트가 없습니다. 파일: ${path}`)
+      }
+
       return {
         text: result.text || '',
         metadata: result.metadata || {},

@@ -7,7 +7,7 @@
  * 기존 PropertyPanel의 2600줄 하드코딩을 대체하기 위한 핵심 컴포넌트.
  */
 
-import React, { useCallback } from 'react'
+import React, { useCallback, useMemo } from 'react'
 import {
   Box,
   Typography,
@@ -20,11 +20,166 @@ import {
   Switch,
   FormControlLabel,
   Button,
+  Chip,
+  ListSubheader,
 } from '@mui/material'
 import FolderOpenIcon from '@mui/icons-material/FolderOpen'
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile'
+import CheckCircleIcon from '@mui/icons-material/CheckCircle'
+import CancelIcon from '@mui/icons-material/Cancel'
 import { invoke } from '@tauri-apps/api/tauri'
 import type { ConfigField } from '../engine/types'
+import { useAppStore, type AIProvider } from '../stores/appStore'
+
+// ============================================================
+// 프로바이더 및 모델 정의
+// ============================================================
+
+export interface ProviderInfo {
+  id: AIProvider
+  name: string
+  icon: string
+  models: { id: string; name: string; category?: string }[]
+}
+
+export const PROVIDER_DEFINITIONS: ProviderInfo[] = [
+  {
+    id: 'bedrock',
+    name: 'AWS Bedrock',
+    icon: '☁️',
+    models: [
+      { id: 'anthropic.claude-3-5-sonnet-20240620-v1:0', name: 'Claude 3.5 Sonnet', category: 'Anthropic' },
+      { id: 'anthropic.claude-3-opus-20240229-v1:0', name: 'Claude 3 Opus', category: 'Anthropic' },
+      { id: 'anthropic.claude-3-sonnet-20240229-v1:0', name: 'Claude 3 Sonnet', category: 'Anthropic' },
+      { id: 'anthropic.claude-3-haiku-20240307-v1:0', name: 'Claude 3 Haiku', category: 'Anthropic' },
+      { id: 'meta.llama3-1-405b-instruct-v1:0', name: 'Llama 3.1 405B', category: 'Meta' },
+      { id: 'meta.llama3-1-70b-instruct-v1:0', name: 'Llama 3.1 70B', category: 'Meta' },
+      { id: 'amazon.titan-text-premier-v1:0', name: 'Titan Text Premier', category: 'Amazon' },
+      { id: 'mistral.mistral-large-2407-v1:0', name: 'Mistral Large', category: 'Mistral' },
+    ],
+  },
+  {
+    id: 'openai',
+    name: 'OpenAI',
+    icon: '🤖',
+    models: [
+      { id: 'gpt-4o', name: 'GPT-4o' },
+      { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },
+      { id: 'gpt-4-turbo', name: 'GPT-4 Turbo' },
+      { id: 'gpt-4', name: 'GPT-4' },
+      { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo' },
+      { id: 'o1-preview', name: 'O1 Preview' },
+      { id: 'o1-mini', name: 'O1 Mini' },
+    ],
+  },
+  {
+    id: 'anthropic',
+    name: 'Anthropic',
+    icon: '🧠',
+    models: [
+      { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet' },
+      { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus' },
+      { id: 'claude-3-sonnet-20240229', name: 'Claude 3 Sonnet' },
+      { id: 'claude-3-haiku-20240307', name: 'Claude 3 Haiku' },
+    ],
+  },
+  {
+    id: 'google',
+    name: 'Google AI',
+    icon: '🔴',
+    models: [
+      { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro' },
+      { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash' },
+      { id: 'gemini-1.0-pro', name: 'Gemini 1.0 Pro' },
+    ],
+  },
+  {
+    id: 'azure',
+    name: 'Azure OpenAI',
+    icon: '🔷',
+    models: [
+      { id: 'gpt-4o', name: 'GPT-4o (Azure)' },
+      { id: 'gpt-4-turbo', name: 'GPT-4 Turbo (Azure)' },
+      { id: 'gpt-35-turbo', name: 'GPT-3.5 Turbo (Azure)' },
+    ],
+  },
+  {
+    id: 'ollama',
+    name: 'Ollama (로컬)',
+    icon: '🦙',
+    models: [
+      { id: 'llama3', name: 'Llama 3' },
+      { id: 'llama3:70b', name: 'Llama 3 70B' },
+      { id: 'mistral', name: 'Mistral' },
+      { id: 'mixtral', name: 'Mixtral' },
+      { id: 'codellama', name: 'Code Llama' },
+      { id: 'phi3', name: 'Phi-3' },
+      { id: 'gemma', name: 'Gemma' },
+    ],
+  },
+]
+
+/** 프로바이더가 API 키가 설정되었는지 확인 */
+function useProviderAvailability(): Map<AIProvider, boolean> {
+  const { aiModelConfig, awsStatus } = useAppStore()
+
+  return useMemo(() => {
+    const availability = new Map<AIProvider, boolean>()
+
+    // Bedrock - AWS 연결 상태 확인
+    availability.set('bedrock', awsStatus?.connected || false)
+
+    // OpenAI - API 키 확인
+    availability.set('openai', !!aiModelConfig.openaiApiKey?.trim())
+
+    // Anthropic - API 키 확인
+    availability.set('anthropic', !!aiModelConfig.anthropicApiKey?.trim())
+
+    // Google - API 키 확인
+    availability.set('google', !!aiModelConfig.googleApiKey?.trim())
+
+    // Azure - Endpoint + API 키 확인
+    availability.set('azure', !!(aiModelConfig.azureEndpoint?.trim() && aiModelConfig.azureApiKey?.trim()))
+
+    // Ollama - Base URL이 있으면 가능 (기본값이 있으므로 항상 true로 처리)
+    availability.set('ollama', true)
+
+    return availability
+  }, [aiModelConfig, awsStatus])
+}
+
+/** 사용 가능한 프로바이더 목록 (API 키 설정된 것 우선) */
+export function getAvailableProviders(): { provider: ProviderInfo; available: boolean }[] {
+  const { aiModelConfig, awsStatus } = useAppStore.getState()
+
+  return PROVIDER_DEFINITIONS.map(provider => {
+    let available = false
+    switch (provider.id) {
+      case 'bedrock': available = awsStatus?.connected || false; break
+      case 'openai': available = !!aiModelConfig.openaiApiKey?.trim(); break
+      case 'anthropic': available = !!aiModelConfig.anthropicApiKey?.trim(); break
+      case 'google': available = !!aiModelConfig.googleApiKey?.trim(); break
+      case 'azure': available = !!(aiModelConfig.azureEndpoint?.trim() && aiModelConfig.azureApiKey?.trim()); break
+      case 'ollama': available = true; break
+    }
+    return { provider, available }
+  })
+}
+
+/** 가장 우선적으로 사용 가능한 프로바이더 자동 선택 */
+export function getDefaultAvailableProvider(): AIProvider | null {
+  const providers = getAvailableProviders()
+
+  // 우선순위: bedrock > openai > anthropic > google > azure > ollama
+  const priority: AIProvider[] = ['bedrock', 'openai', 'anthropic', 'google', 'azure', 'ollama']
+
+  for (const p of priority) {
+    const found = providers.find(item => item.provider.id === p && item.available)
+    if (found) return found.provider.id
+  }
+
+  return null
+}
 
 interface ConfigSchemaRendererProps {
   /** configSchema 필드 배열 */
@@ -313,21 +468,10 @@ function FieldRenderer({ field, value, onChange }: FieldRendererProps) {
       )
 
     case 'provider':
+      return <ProviderSelector field={field} value={value} onChange={handleChange} />
+
     case 'model':
-      // Provider/Model 선택은 ProviderRegistry와 연동
-      return (
-        <TextField
-          fullWidth
-          size="small"
-          label={field.label}
-          value={value || ''}
-          placeholder={field.placeholder || (field.type === 'provider' ? '기본 프로바이더 사용' : '기본 모델 사용')}
-          helperText={field.description}
-          onChange={(e) => handleChange(e.target.value)}
-          sx={commonSx}
-          FormHelperTextProps={{ sx: { color: 'grey.500', fontSize: '0.7rem' } }}
-        />
-      )
+      return <ModelSelector field={field} value={value} onChange={handleChange} />
 
     default:
       return (
@@ -341,4 +485,156 @@ function FieldRenderer({ field, value, onChange }: FieldRendererProps) {
         />
       )
   }
+}
+
+// ============================================================
+// 프로바이더 선택 컴포넌트
+// ============================================================
+
+interface ProviderSelectorProps {
+  field: ConfigField
+  value: string
+  onChange: (value: string) => void
+}
+
+function ProviderSelector({ field, value, onChange }: ProviderSelectorProps) {
+  const availability = useProviderAvailability()
+
+  // 사용 가능한 프로바이더가 없으면 자동으로 첫 번째 사용 가능한 것으로 설정
+  React.useEffect(() => {
+    if (!value) {
+      const defaultProvider = getDefaultAvailableProvider()
+      if (defaultProvider) {
+        onChange(defaultProvider)
+      }
+    }
+  }, [value, onChange])
+
+  return (
+    <FormControl fullWidth size="small">
+      <InputLabel sx={{ color: 'grey.400' }}>{field.label}</InputLabel>
+      <Select
+        value={value || ''}
+        label={field.label}
+        onChange={(e) => onChange(e.target.value)}
+        sx={{
+          background: 'rgba(255,255,255,0.05)',
+          color: 'white',
+          '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.15)' },
+          '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.3)' },
+        }}
+        renderValue={(selected) => {
+          const provider = PROVIDER_DEFINITIONS.find(p => p.id === selected)
+          const isAvailable = availability.get(selected as AIProvider) || false
+          if (!provider) return selected
+          return (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <span>{provider.icon}</span>
+              <span>{provider.name}</span>
+              {isAvailable ? (
+                <Chip label="연결됨" size="small" sx={{ height: 18, fontSize: '0.65rem', bgcolor: '#10b981', color: 'white' }} />
+              ) : (
+                <Chip label="API 키 필요" size="small" sx={{ height: 18, fontSize: '0.65rem', bgcolor: '#ef4444', color: 'white' }} />
+              )}
+            </Box>
+          )
+        }}
+      >
+        {/* API 키 있는 프로바이더 */}
+        <ListSubheader sx={{ bgcolor: '#1e293b', color: '#10b981', fontSize: '0.75rem' }}>
+          ✅ 사용 가능 (API 키 설정됨)
+        </ListSubheader>
+        {PROVIDER_DEFINITIONS.filter(p => availability.get(p.id)).map((provider) => (
+          <MenuItem key={provider.id} value={provider.id}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%' }}>
+              <span>{provider.icon}</span>
+              <span>{provider.name}</span>
+              <CheckCircleIcon sx={{ ml: 'auto', fontSize: 16, color: '#10b981' }} />
+            </Box>
+          </MenuItem>
+        ))}
+
+        {/* API 키 없는 프로바이더 */}
+        <ListSubheader sx={{ bgcolor: '#1e293b', color: '#94a3b8', fontSize: '0.75rem' }}>
+          ⚠️ API 키 설정 필요
+        </ListSubheader>
+        {PROVIDER_DEFINITIONS.filter(p => !availability.get(p.id)).map((provider) => (
+          <MenuItem key={provider.id} value={provider.id} disabled>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%', opacity: 0.5 }}>
+              <span>{provider.icon}</span>
+              <span>{provider.name}</span>
+              <CancelIcon sx={{ ml: 'auto', fontSize: 16, color: '#ef4444' }} />
+            </Box>
+          </MenuItem>
+        ))}
+      </Select>
+      {field.description && (
+        <Typography variant="caption" color="grey.500" sx={{ mt: 0.5, fontSize: '0.7rem' }}>
+          {field.description}
+        </Typography>
+      )}
+    </FormControl>
+  )
+}
+
+// ============================================================
+// 모델 선택 컴포넌트
+// ============================================================
+
+interface ModelSelectorProps {
+  field: ConfigField
+  value: string
+  onChange: (value: string) => void
+}
+
+function ModelSelector({ field, value, onChange }: ModelSelectorProps) {
+  // 부모 컴포넌트에서 provider 값을 알아야 함
+  // ConfigSchemaRenderer는 values를 통해 이 정보를 알 수 있음
+  // 그러나 여기서는 field만 받으므로, 전역 상태에서 현재 선택된 provider를 확인
+
+  // TODO: 이상적으로는 부모에서 values를 전달받아야 함
+  // 임시로 전체 프로바이더의 모델 목록을 보여줌
+
+  const availability = useProviderAvailability()
+
+  // 사용 가능한 프로바이더의 모델만 표시
+  const availableProviders = PROVIDER_DEFINITIONS.filter(p => availability.get(p.id))
+
+  return (
+    <FormControl fullWidth size="small">
+      <InputLabel sx={{ color: 'grey.400' }}>{field.label}</InputLabel>
+      <Select
+        value={value || ''}
+        label={field.label}
+        onChange={(e) => onChange(e.target.value)}
+        sx={{
+          background: 'rgba(255,255,255,0.05)',
+          color: 'white',
+          '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.15)' },
+          '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.3)' },
+        }}
+      >
+        {availableProviders.map((provider) => [
+          <ListSubheader key={`header-${provider.id}`} sx={{ bgcolor: '#1e293b', color: '#10b981', fontSize: '0.75rem' }}>
+            {provider.icon} {provider.name}
+          </ListSubheader>,
+          ...provider.models.map((model) => (
+            <MenuItem key={model.id} value={model.id}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%' }}>
+                <span>{model.name}</span>
+                {model.category && (
+                  <Chip label={model.category} size="small" sx={{ height: 16, fontSize: '0.6rem', bgcolor: '#334155', color: '#94a3b8' }} />
+                )}
+              </Box>
+            </MenuItem>
+          )),
+        ])}
+      </Select>
+      {field.description && (
+        <Typography variant="caption" color="grey.500" sx={{ mt: 0.5, fontSize: '0.7rem' }}>
+          {field.description}
+        </Typography>
+      )}
+    </FormControl>
+  )
 }

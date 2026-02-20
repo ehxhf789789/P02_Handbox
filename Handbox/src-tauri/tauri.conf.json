@@ -2,7 +2,7 @@
   "build": {
     "beforeBuildCommand": "npm run build",
     "beforeDevCommand": "npm run dev",
-    "devPath": "http://localhost:5173",
+    "devPath": "http://localhost:5175",
     "distDir": "../dist"
   },
   "package": {
@@ -69,7 +69,8 @@
         "resizable": true,
         "title": "Handbox",
         "width": 1400,
-        "center": true
+        "center": true,
+        "fileDropEnabled": true
       }
     ]
   }

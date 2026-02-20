@@ -23,5 +23,8 @@ pub mod tool_process;
 // === Tier 2 플러그인 시스템 ===
 pub mod plugin_manager;
 
+// === 테스트 및 검증 시스템 ===
+pub mod workflow_stress_test;
+
 #[cfg(test)]
 mod workflow_test;

@@ -399,6 +399,7 @@ const WorkflowEditorInner = memo(function WorkflowEditorInner() {
         multiSelectionKeyCode="Shift"
         panOnDrag={[1, 2]}
         defaultEdgeOptions={defaultEdgeOptions}
+        proOptions={{ hideAttribution: true }}
         style={{ background: '#0f172a' }}
       >
         <Background color="#334155" gap={20} size={1} />

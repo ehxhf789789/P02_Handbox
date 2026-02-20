@@ -286,7 +286,7 @@ export const PROVIDER_FIELDS: Record<
   aws: [
     { key: 'access_key_id', label: 'Access Key ID', type: 'text', required: true },
     { key: 'secret_access_key', label: 'Secret Access Key', type: 'password', required: true },
-    { key: 'region', label: 'Region', type: 'text', required: true },
+    // region은 ProviderSetup에서 드롭다운으로 별도 처리
     { key: 'profile', label: 'Profile Name', type: 'text', required: false },
   ],
   azure: [

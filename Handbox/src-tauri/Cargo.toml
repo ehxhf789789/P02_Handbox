@@ -71,6 +71,12 @@ regex = "1"
 # base64 인코딩 (바이너리 파일 전달용)
 base64 = "0.22"
 
+# 시스템 디렉토리 경로 (Documents, Home 등)
+dirs = "5"
+
+# 랜덤 생성 (테스트용)
+rand = "0.8"
+
 # AWS SDK HTTP 클라이언트 - native-tls 사용 (Windows 시스템 인증서)
 aws-smithy-runtime = { version = "1.7", features = ["client", "connector-hyper-0-14-x"] }
 hyper = { version = "0.14", features = ["client", "http1", "http2", "tcp"] }

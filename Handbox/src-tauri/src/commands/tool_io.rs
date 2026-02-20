@@ -229,6 +229,92 @@ pub async fn tool_file_read(
 }
 
 // ─────────────────────────────────────────────
+// 경로 검증 및 정규화 (Windows 호환)
+// ─────────────────────────────────────────────
+
+/// Windows 파일명에서 허용되지 않는 문자를 제거하거나 교체
+fn sanitize_filename(name: &str) -> String {
+    // Windows에서 허용되지 않는 문자: \ / : * ? " < > |
+    let invalid_chars = ['\\', '/', ':', '*', '?', '"', '<', '>', '|'];
+    let mut result = String::new();
+
+    for ch in name.chars() {
+        if invalid_chars.contains(&ch) {
+            result.push('_'); // 유효하지 않은 문자를 _로 교체
+        } else if ch.is_control() {
+            // 제어 문자 제거
+            continue;
+        } else {
+            result.push(ch);
+        }
+    }
+
+    // 빈 문자열 방지
+    if result.trim().is_empty() {
+        return "output".to_string();
+    }
+
+    // Windows 예약어 체크 (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
+    let upper = result.to_uppercase();
+    let reserved = ["CON", "PRN", "AUX", "NUL",
+                    "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+                    "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"];
+
+    let base_name = result.split('.').next().unwrap_or(&result);
+    if reserved.contains(&base_name.to_uppercase().as_str()) {
+        return format!("_{}", result);
+    }
+
+    result
+}
+
+/// 전체 경로 검증 및 정규화
+fn validate_and_sanitize_path(path: &str) -> Result<String, String> {
+    if path.trim().is_empty() {
+        return Err("파일 경로가 비어 있습니다".to_string());
+    }
+
+    let path = path.trim();
+
+    // 줄바꿈이나 탭이 포함된 경우 제거
+    let path = path.replace(['\n', '\r', '\t'], "");
+
+    // Windows 절대 경로 패턴 체크 (C:\ 또는 \\)
+    #[cfg(windows)]
+    {
+        let path_obj = Path::new(&path);
+
+        // 파일명만 sanitize (디렉토리 경로는 유지)
+        if let Some(file_name) = path_obj.file_name() {
+            let sanitized_name = sanitize_filename(&file_name.to_string_lossy());
+
+            if let Some(parent) = path_obj.parent() {
+                let new_path = parent.join(&sanitized_name);
+                return Ok(new_path.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    Ok(path)
+}
+
+/// 기본 출력 경로 생성 (경로가 비어있거나 유효하지 않을 때)
+fn get_default_output_path(extension: &str) -> String {
+    let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+    let home = dirs::document_dir()
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+    let output_dir = home.join("Handbox_Output");
+    let _ = std::fs::create_dir_all(&output_dir);
+
+    output_dir
+        .join(format!("output_{}.{}", timestamp, extension))
+        .to_string_lossy()
+        .to_string()
+}
+
+// ─────────────────────────────────────────────
 // file.write — 파일 쓰기
 // ─────────────────────────────────────────────
 #[tauri::command]
@@ -240,7 +326,14 @@ pub async fn tool_file_write(
     create_dirs: Option<bool>,
     backup: Option<bool>,
 ) -> Result<Value, String> {
-    let file_path = Path::new(&path);
+    // 경로 검증 및 정규화
+    let sanitized_path = if path.trim().is_empty() {
+        get_default_output_path("txt")
+    } else {
+        validate_and_sanitize_path(&path)?
+    };
+
+    let file_path = Path::new(&sanitized_path);
 
     // 상위 디렉토리 생성
     if create_dirs.unwrap_or(true) {
@@ -255,7 +348,7 @@ pub async fn tool_file_write(
     // 백업
     let mut backup_path_str = None;
     if backup.unwrap_or(false) && file_path.exists() {
-        let bak = format!("{}.bak", path);
+        let bak = format!("{}.bak", sanitized_path);
         fs::copy(file_path, &bak).map_err(|e| format!("백업 실패: {}", e))?;
         backup_path_str = Some(bak);
     }
@@ -286,7 +379,7 @@ pub async fn tool_file_write(
         }
         "atomic" => {
             // 임시 파일에 쓴 후 rename (원자적 쓰기)
-            let tmp_path = format!("{}.tmp.{}", path, uuid::Uuid::new_v4());
+            let tmp_path = format!("{}.tmp.{}", sanitized_path, uuid::Uuid::new_v4());
             fs::write(&tmp_path, &bytes).map_err(|e| format!("임시 파일 쓰기 실패: {}", e))?;
             fs::rename(&tmp_path, file_path).map_err(|e| {
                 // rename 실패 시 임시 파일 정리
@@ -304,7 +397,7 @@ pub async fn tool_file_write(
 
     Ok(json!({
         "success": true,
-        "path": path,
+        "path": sanitized_path,
         "size": written_size,
         "size_human": format_size(written_size),
         "backup_path": backup_path_str,

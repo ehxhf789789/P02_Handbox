@@ -473,17 +473,13 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     get().clearAllExecutionResults()
     get().setWorkflowRunning(true)
 
-    // === API 서버 상태 확인 ===
+    // === API 서버 상태 확인 (선택적 - Tier 1 도구는 Tauri 백엔드 사용) ===
     const apiStatus = await checkAPIServer()
     if (!apiStatus.available) {
-      console.error('API 서버가 실행 중이 아닙니다. python -m uvicorn aws_agent.api.server:app --reload')
-      get().setWorkflowRunning(false)
-      return
+      console.log('[WorkflowStore] 레거시 API 서버 미실행 - Tier 1 Tauri 도구로 실행')
+    } else {
+      console.log(`[WorkflowStore] API 서버 상태: AWS=${apiStatus.aws_configured}, Bedrock=${apiStatus.bedrock_available}`)
     }
-    if (!apiStatus.aws_configured) {
-      console.error('AWS 자격 증명이 설정되지 않았습니다. .env 파일을 확인하세요.')
-    }
-    console.log(`API 서버 상태: AWS=${apiStatus.aws_configured}, Bedrock=${apiStatus.bedrock_available}`)
 
     // 토폴로지 정렬
     const sortedNodes = topologicalSort(enabledNodes, state.edges)
