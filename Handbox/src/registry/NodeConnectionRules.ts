@@ -155,6 +155,7 @@ export const NODE_PORT_REGISTRY: Record<string, NodePortInfo> = {
       'rag.retriever',      // RAG 검색
       'rag.context-builder', // 컨텍스트 빌더
       'agent.persona',      // 페르소나 에이전트
+      'api.http-request',   // 파일 내용을 HTTP 요청 본문으로 전송
     ],
     canReceiveFrom: [],  // 시작 노드
   },
@@ -937,6 +938,7 @@ export const NODE_PORT_REGISTRY: Record<string, NodePortInfo> = {
       'prompt.template',    // 동적 URL/body 생성
       'ai.llm-invoke',      // LLM이 생성한 요청
       'data.preprocess',    // 전처리된 데이터
+      'io.local-file',      // 파일 내용을 HTTP body로 전송
     ],
   },
 
