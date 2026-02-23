@@ -1397,6 +1397,8 @@ class IntegratedWorkflowAgentImpl {
 - ❌ \`retrieve\` - 존재하지 않음 (RAG 검색은 \`rag.retriever\` 사용)
 - ❌ \`retrieve_relevant_laws\`, \`analyze_additions\` - 함수 이름 형식 불가! (\`rag.retriever\`, \`ai.llm-invoke\` 사용)
 - ❌ \`extract_*\`, \`analyze_*\`, \`process_*\`, \`get_*\` - 함수명 패턴 노드는 존재하지 않음
+- ❌ \`image_analysis\` - 존재하지 않음 (이미지 분석은 \`vision.image-analyzer\` 사용)
+- ❌ \`result_display\` - 존재하지 않음 (결과 표시는 \`viz.result-viewer\` 사용)
 
 ⚠️ **중요: 노드 타입 명명 규칙**
 - ✅ 정확한 노드 타입만 사용: \`io.local-file\`, \`ai.llm-invoke\`, \`viz.result-viewer\` 등
@@ -1408,6 +1410,13 @@ class IntegratedWorkflowAgentImpl {
 ⚠️ **시작 노드 연결 금지**: 다음 노드들은 입력이 없으므로 다른 노드에서 연결할 수 없습니다:
 - \`io.local-folder\`, \`io.local-file\`, \`data.file-loader\` - 시작 노드끼리 연결 불가
 - ❌ 잘못된 예: \`io.local-file → data.file-loader\` (둘 다 시작 노드)
+
+⚠️ **필수 입력 연결**: 다음 노드들은 반드시 입력이 연결되어야 합니다:
+- \`convert.doc-parser\` - 반드시 파일 소스(\`io.local-file\`)에서 연결 필요
+- \`prompt.few-shot\` - 반드시 텍스트 입력(\`variable.input\` 또는 다른 노드 출력)에서 연결 필요
+- \`ai.llm-invoke\` - 반드시 프롬프트 입력이 필요
+- \`rag.retriever\` - 반드시 쿼리 텍스트 입력이 필요
+- ❌ 모든 처리 노드는 입력 없이 사용 불가!
 
 ## MCP 도구 (확장)
 ${toolList}
