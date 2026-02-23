@@ -527,6 +527,194 @@ export interface DesignError {
   lastOccurred: string
 }
 
+// ============================================================
+// Success Pattern Learning (성공 패턴 학습)
+// ============================================================
+
+interface SuccessPattern {
+  id: string
+  promptKeywords: string[]  // 프롬프트에서 추출한 키워드
+  nodeSequence: string[]     // 사용된 노드 타입 시퀀스
+  edgePattern: string[]      // 연결 패턴 (예: "io.local-file → convert.doc-parser")
+  successCount: number       // 성공 횟수
+  lastUsed: string
+}
+
+class SuccessPatternLearningSystemImpl {
+  private patterns: Map<string, SuccessPattern> = new Map()
+  private dbInitialized = false
+
+  async initialize(): Promise<void> {
+    if (this.dbInitialized) return
+    try {
+      await invoke('memory_db_execute', {
+        sql: `
+          CREATE TABLE IF NOT EXISTS success_patterns (
+            id TEXT PRIMARY KEY,
+            prompt_keywords TEXT,
+            node_sequence TEXT,
+            edge_pattern TEXT,
+            success_count INTEGER,
+            last_used TEXT
+          )
+        `,
+        params: [],
+      })
+      await this.loadFromDB()
+      this.dbInitialized = true
+      console.log('[SuccessPatternLearning] 초기화 완료')
+    } catch (error) {
+      console.warn('[SuccessPatternLearning] DB 초기화 실패, 메모리 모드:', error)
+      this.dbInitialized = true  // 메모리 모드로 계속
+    }
+  }
+
+  private async loadFromDB(): Promise<void> {
+    try {
+      const rows = await invoke<any[]>('memory_db_query', {
+        sql: 'SELECT * FROM success_patterns ORDER BY success_count DESC LIMIT 50',
+        params: [],
+      })
+      for (const row of rows) {
+        this.patterns.set(row.id, {
+          id: row.id,
+          promptKeywords: JSON.parse(row.prompt_keywords || '[]'),
+          nodeSequence: JSON.parse(row.node_sequence || '[]'),
+          edgePattern: JSON.parse(row.edge_pattern || '[]'),
+          successCount: row.success_count,
+          lastUsed: row.last_used,
+        })
+      }
+      console.log(`[SuccessPatternLearning] ${this.patterns.size}개 성공 패턴 로드`)
+    } catch (error) {
+      console.warn('[SuccessPatternLearning] DB 로드 실패:', error)
+    }
+  }
+
+  /**
+   * 성공한 워크플로우 패턴 기록
+   */
+  async recordSuccess(
+    prompt: string,
+    nodes: Array<{ type: string }>,
+    edges: Array<{ source: string; target: string }>,
+  ): Promise<void> {
+    await this.initialize()
+
+    // 키워드 추출 (간단한 방식)
+    const keywords = prompt.toLowerCase()
+      .replace(/[^\w\s가-힣]/g, ' ')
+      .split(/\s+/)
+      .filter(w => w.length > 2)
+      .slice(0, 10)
+
+    // 노드 시퀀스
+    const nodeSequence = nodes.map(n => n.type)
+
+    // 엣지 패턴 (노드 ID → 노드 타입 변환은 별도 처리 필요)
+    const edgePattern = edges.map(e => `${e.source} → ${e.target}`).slice(0, 5)
+
+    const id = nodeSequence.join('→')
+    const existing = this.patterns.get(id)
+
+    if (existing) {
+      existing.successCount += 1
+      existing.lastUsed = new Date().toISOString()
+      // 키워드 병합
+      const allKeywords = new Set([...existing.promptKeywords, ...keywords])
+      existing.promptKeywords = Array.from(allKeywords).slice(0, 20)
+    } else {
+      this.patterns.set(id, {
+        id,
+        promptKeywords: keywords,
+        nodeSequence,
+        edgePattern,
+        successCount: 1,
+        lastUsed: new Date().toISOString(),
+      })
+    }
+
+    // DB 저장
+    try {
+      const pattern = this.patterns.get(id)!
+      await invoke('memory_db_execute', {
+        sql: `
+          INSERT OR REPLACE INTO success_patterns
+          (id, prompt_keywords, node_sequence, edge_pattern, success_count, last_used)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `,
+        params: [
+          pattern.id,
+          JSON.stringify(pattern.promptKeywords),
+          JSON.stringify(pattern.nodeSequence),
+          JSON.stringify(pattern.edgePattern),
+          pattern.successCount,
+          pattern.lastUsed,
+        ],
+      })
+    } catch (e) {
+      console.warn('[SuccessPatternLearning] 저장 실패:', e)
+    }
+
+    console.log(`[SuccessPatternLearning] 성공 패턴 기록: ${nodeSequence.join(' → ')} (총 ${this.patterns.get(id)!.successCount}회)`)
+  }
+
+  /**
+   * 프롬프트에 맞는 성공 패턴 추천
+   */
+  getSuggestedPatterns(prompt: string): string {
+    if (this.patterns.size === 0) return ''
+
+    const promptKeywords = prompt.toLowerCase().split(/\s+/)
+
+    // 키워드 매칭으로 관련 패턴 찾기
+    const scored = Array.from(this.patterns.values()).map(p => {
+      const matchCount = p.promptKeywords.filter(k => promptKeywords.some(pk => pk.includes(k) || k.includes(pk))).length
+      return { pattern: p, score: matchCount * p.successCount }
+    }).filter(s => s.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3)
+
+    if (scored.length === 0) return ''
+
+    const lines: string[] = ['## ✅ 검증된 성공 패턴 (이 패턴을 참고하세요!)']
+    for (const { pattern } of scored) {
+      lines.push(`\n### 패턴: ${pattern.nodeSequence.join(' → ')}`)
+      lines.push(`- 성공 횟수: ${pattern.successCount}회`)
+      lines.push(`- 관련 키워드: ${pattern.promptKeywords.slice(0, 5).join(', ')}`)
+    }
+
+    return lines.join('\n')
+  }
+
+  /**
+   * 동적 Few-Shot 예시 생성
+   */
+  getDynamicFewShotExamples(): string {
+    const topPatterns = Array.from(this.patterns.values())
+      .sort((a, b) => b.successCount - a.successCount)
+      .slice(0, 2)
+
+    if (topPatterns.length === 0) return ''
+
+    const examples: string[] = ['## 🎯 검증된 워크플로우 예시 (이 패턴은 실제로 성공했습니다!)']
+
+    for (const pattern of topPatterns) {
+      examples.push(`\n**패턴**: \`${pattern.nodeSequence.join(' → ')}\``)
+      examples.push(`- 성공 횟수: ${pattern.successCount}회`)
+      examples.push(`- 키워드: ${pattern.promptKeywords.slice(0, 3).join(', ')}`)
+    }
+
+    return examples.join('\n')
+  }
+}
+
+export const SuccessPatternLearningSystem = new SuccessPatternLearningSystemImpl()
+
+// ============================================================
+// Design Error Learning (설계 오류 학습) - 기존 유지
+// ============================================================
+
 class DesignErrorLearningSystemImpl {
   private errors: Map<string, DesignError> = new Map()
   private dbInitialized = false
@@ -1071,6 +1259,9 @@ class IntegratedWorkflowAgentImpl {
     // 설계 오류 회피 가이드라인 (강화학습 기반)
     const errorAvoidanceGuidelines = DesignErrorLearningSystem.getErrorAvoidanceGuidelines()
 
+    // 성공 패턴 추천 (강화학습 - 성공 사례)
+    const successPatternExamples = SuccessPatternLearningSystem.getDynamicFewShotExamples()
+
     return `당신은 Handbox 통합 워크플로우 생성 에이전트입니다.
 
 ## 핵심 역할 - 가장 중요!
@@ -1176,6 +1367,12 @@ class IntegratedWorkflowAgentImpl {
 ### 내보내기 (Export)
 - \`export.excel\`: Excel 파일 생성
 
+⚠️ **중요: 위 목록에 없는 노드 타입은 절대 사용하지 마세요!**
+- ❌ \`cross_reference_analyzer\` - 존재하지 않음
+- ❌ \`data_analyzer\` - 존재하지 않음
+- ❌ \`text_processor\` - 존재하지 않음
+- ✅ 정확한 노드 타입만 사용: \`io.local-file\`, \`ai.llm-invoke\`, \`viz.result-viewer\` 등
+
 ## MCP 도구 (확장)
 ${toolList}
 
@@ -1222,6 +1419,8 @@ ${toolList}
 \`\`\`
 
 ${learnedPatternInfo ? `## 학습된 사용자 선호 패턴\n${learnedPatternInfo}\n` : ''}
+
+${successPatternExamples ? `${successPatternExamples}\n` : ''}
 
 ${errorAvoidanceGuidelines ? `${errorAvoidanceGuidelines}\n` : ''}
 

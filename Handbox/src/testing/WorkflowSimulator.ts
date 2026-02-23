@@ -1768,6 +1768,20 @@ export class WorkflowSimulator {
           this.successfulResults.push(result)
           consecutiveFailures = 0
 
+          // 🎯 강화학습: 성공 패턴 기록
+          if (result.generatedWorkflow) {
+            try {
+              const { SuccessPatternLearningSystem } = await import('../services/IntegratedWorkflowAgent')
+              await SuccessPatternLearningSystem.recordSuccess(
+                result.prompt,
+                result.generatedWorkflow.nodes || [],
+                result.generatedWorkflow.edges || [],
+              )
+            } catch (e) {
+              console.warn('[RL] 성공 패턴 기록 실패:', e)
+            }
+          }
+
           // 진행 상황 출력
           const progress = (this.successfulResults.length / targetSuccessCount * 100).toFixed(2)
           if (this.successfulResults.length % 10 === 0 || this.successfulResults.length === targetSuccessCount) {
