@@ -115,9 +115,16 @@ export const NODE_PORT_REGISTRY: Record<string, NodePortInfo> = {
       'ai.embedding',         // 임베딩
       'data.preprocess',      // 전처리
       'prompt.template',      // 프롬프트 템플릿
+      'prompt.cot',           // CoT 프롬프트
+      'prompt.few-shot',      // Few-shot 프롬프트
+      'prompt.agent',         // 에이전트 프롬프트
       'viz.result-viewer',    // 결과 뷰어
       'viz.table',            // 테이블 뷰어
       'control.merge',        // 병합
+      'vision.analyze',       // 이미지 분석
+      'rag.retriever',        // RAG 검색
+      'rag.context-builder',  // 컨텍스트 빌더
+      'agent.persona',        // 페르소나 에이전트
     ],
     canReceiveFrom: [],  // 시작 노드
   },
@@ -138,10 +145,16 @@ export const NODE_PORT_REGISTRY: Record<string, NodePortInfo> = {
       'ai.embedding',
       'data.preprocess',
       'prompt.template',
+      'prompt.cot',         // CoT 프롬프트
+      'prompt.few-shot',    // Few-shot 프롬프트
+      'prompt.agent',       // 에이전트 프롬프트
       'viz.result-viewer',
       'viz.table',  // 파일 → 테이블 표시
       'control.merge',  // 다중 파일 병합
       'vision.analyze',  // 이미지 분석
+      'rag.retriever',      // RAG 검색
+      'rag.context-builder', // 컨텍스트 빌더
+      'agent.persona',      // 페르소나 에이전트
     ],
     canReceiveFrom: [],  // 시작 노드
   },
@@ -352,7 +365,17 @@ export const NODE_PORT_REGISTRY: Record<string, NodePortInfo> = {
       { name: 'prompt', type: 'text' },
     ],
     canConnectTo: ['ai.llm-invoke', 'agent.persona'],
-    canReceiveFrom: ['convert.doc-parser', 'text.splitter', 'prompt.template', 'rag.context-builder'],
+    canReceiveFrom: [
+      'io.local-file',       // 파일에서 직접 입력
+      'io.local-folder',     // 폴더에서 직접 입력
+      'data.file-loader',    // 데이터 로더
+      'convert.doc-parser',
+      'text.splitter',
+      'prompt.template',
+      'rag.context-builder',
+      'data.preprocess',     // 전처리 결과
+      'ai.llm-invoke',       // LLM 출력 체인
+    ],
   },
 
   'prompt.few-shot': {
@@ -366,7 +389,17 @@ export const NODE_PORT_REGISTRY: Record<string, NodePortInfo> = {
       { name: 'prompt', type: 'text' },
     ],
     canConnectTo: ['ai.llm-invoke', 'agent.persona'],
-    canReceiveFrom: ['convert.doc-parser', 'text.splitter', 'prompt.template', 'rag.context-builder'],
+    canReceiveFrom: [
+      'io.local-file',       // 파일에서 직접 입력
+      'io.local-folder',     // 폴더에서 직접 입력
+      'data.file-loader',    // 데이터 로더
+      'convert.doc-parser',
+      'text.splitter',
+      'prompt.template',
+      'rag.context-builder',
+      'data.preprocess',     // 전처리 결과
+      'ai.llm-invoke',       // LLM 출력 체인
+    ],
   },
 
   // ============================================================
