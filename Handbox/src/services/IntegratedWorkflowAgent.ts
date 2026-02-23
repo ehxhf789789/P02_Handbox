@@ -1389,8 +1389,18 @@ class IntegratedWorkflowAgentImpl {
 - ❌ \`text_processor\` - 존재하지 않음
 - ❌ \`document_parser\` - 존재하지 않음 (문서 파싱은 \`convert.doc-parser\` 사용)
 - ❌ \`llm_invoke\` - 존재하지 않음 (LLM 호출은 \`ai.llm-invoke\` 사용)
+- ❌ \`text_preprocessing\` - 존재하지 않음 (전처리는 \`data.preprocess\` 사용)
+- ❌ \`result_view\` - 존재하지 않음 (결과 표시는 \`viz.result-viewer\` 사용)
+- ❌ \`vector_search\` - 존재하지 않음 (벡터 검색은 \`rag.retriever\` 사용)
+- ❌ \`display_results\` - 존재하지 않음 (결과 표시는 \`viz.result-viewer\` 사용)
+- ❌ \`kb.create\`, \`kb.query\` - Knowledge Base 노드는 없음 (RAG는 \`rag.retriever\` 사용)
 - ✅ 정확한 노드 타입만 사용: \`io.local-file\`, \`ai.llm-invoke\`, \`viz.result-viewer\` 등
 - ✅ **노드 타입은 반드시 "카테고리.이름" 형식입니다** (예: io.local-file, ai.llm-invoke)
+- ✅ **벡터 저장/검색**: \`ai.embedding\` → \`rag.retriever\` (kb.* 노드 없음)
+
+⚠️ **시작 노드 연결 금지**: 다음 노드들은 입력이 없으므로 다른 노드에서 연결할 수 없습니다:
+- \`io.local-folder\`, \`io.local-file\`, \`data.file-loader\` - 시작 노드끼리 연결 불가
+- ❌ 잘못된 예: \`io.local-file → data.file-loader\` (둘 다 시작 노드)
 
 ## MCP 도구 (확장)
 ${toolList}
