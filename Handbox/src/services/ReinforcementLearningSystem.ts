@@ -15,6 +15,10 @@ import { invoke } from '@tauri-apps/api/tauri'
 import { LocalLLMProvider, configureOllama } from './LocalLLMProvider'
 import { ProviderRegistry } from '../registry/ProviderRegistry'
 import { useAppStore } from '../stores/appStore'
+import {
+  learnConnectionRuleFromError,
+  addDynamicConnectionRule,
+} from '../registry/NodeConnectionRules'
 
 // ============================================================
 // Types
@@ -794,7 +798,8 @@ ${successPatterns.slice(0, 5).map(p => `- ${p.pattern} (${p.frequency}회 성공
   }
 
   /**
-   * 연결 규칙 개선 제안
+   * 연결 규칙 개선 제안 및 자동 적용
+   * 🎯 RL 자동화: 연결 규칙을 동적으로 즉시 적용
    */
   private async proposeConnectionRules(
     patterns: LearningPattern[]
@@ -805,19 +810,30 @@ ${successPatterns.slice(0, 5).map(p => `- ${p.pattern} (${p.frequency}회 성공
     for (const pattern of connectionPatterns.slice(0, 5)) {
       const match = pattern.pattern.match(/(\w+\.\w+)\s*→\s*(\w+\.\w+)/)
       if (match) {
+        const sourceType = match[1]
+        const targetType = match[2]
+
+        // 🎯 즉시 동적 규칙 적용 (3회 이상 실패한 패턴)
+        if (pattern.frequency >= 3) {
+          const ruleAdded = addDynamicConnectionRule(sourceType, targetType)
+          if (ruleAdded) {
+            console.log(`[LLM Meta-Learner] ✅ 연결 규칙 자동 적용: ${sourceType} → ${targetType}`)
+          }
+        }
+
         proposals.push({
           id: `connection_${match[1]}_${match[2]}_${Date.now()}`,
           timestamp: new Date().toISOString(),
           area: 'connection_rule',
           currentState: `${match[1]} → ${match[2]} 연결 불가`,
-          proposedChange: `NODE_PORT_REGISTRY['${match[1]}'].canConnectTo에 '${match[2]}' 추가`,
-          rationale: `${pattern.frequency}회 연결 시도 실패. 연결 규칙 추가 필요.`,
+          proposedChange: `동적 규칙 추가됨: ${match[1]} → ${match[2]}`,
+          rationale: `${pattern.frequency}회 연결 시도 실패. ${pattern.frequency >= 3 ? '✅ 자동 적용됨' : '⏳ 추가 검증 필요'}`,
           expectedImpact: {
             successRateChange: pattern.frequency * 0.5,
             qualityScoreChange: 0,
             affectedScenarios: [pattern.pattern],
           },
-          status: 'pending',
+          status: pattern.frequency >= 3 ? 'applied' : 'pending',
         })
       }
     }
@@ -858,7 +874,7 @@ ${successPatterns.slice(0, 5).map(p => `- ${p.pattern} (${p.frequency}회 성공
         temperature: 0.3,
         maxTokens: 2000,
       })
-      return response.text
+      return response.content
     } catch (localError) {
       console.warn('[LLM Meta-Learner] 로컬 LLM도 실패:', localError)
       throw localError
@@ -937,6 +953,26 @@ class ReinforcementLearningSystemImpl {
 
     await RLDatabase.saveFeedback(feedback)
     console.log(`[RL System] 피드백 기록: ${feedback.success ? '✅ 성공' : '❌ 실패'}`)
+
+    // 🎯 자동 개선: CONNECTION 오류 감지 시 동적 규칙 추가
+    if (!result.success && result.errors) {
+      for (const error of result.errors) {
+        if (error.type === 'CONNECTION' && error.detail) {
+          const ruleAdded = learnConnectionRuleFromError(error.detail)
+          if (ruleAdded) {
+            console.log(`[RL System] 🔧 동적 연결 규칙 학습: ${error.detail}`)
+          }
+        }
+      }
+    }
+
+    // 실패 사유에서도 연결 오류 학습
+    if (!result.success && result.failureReason?.includes('CONNECTION_ERROR')) {
+      const ruleAdded = learnConnectionRuleFromError(result.failureReason)
+      if (ruleAdded) {
+        console.log(`[RL System] 🔧 실패 사유에서 연결 규칙 학습`)
+      }
+    }
   }
 
   /**

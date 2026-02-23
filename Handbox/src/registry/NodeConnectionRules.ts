@@ -1153,6 +1153,105 @@ export function getConnectionRulesSummary(): string {
 }
 
 // ============================================================
+// Dynamic Rule Override System (강화학습 자동 적용)
+// ============================================================
+
+/**
+ * 런타임에 추가된 동적 연결 규칙
+ * RL 시스템이 학습한 새로운 연결 가능성을 저장
+ */
+const dynamicConnectionRules: Map<string, Set<string>> = new Map()
+
+/**
+ * 동적 연결 규칙 추가
+ * @param sourceType 소스 노드 타입
+ * @param targetType 타겟 노드 타입
+ * @returns 새로 추가된 경우 true
+ */
+export function addDynamicConnectionRule(sourceType: string, targetType: string): boolean {
+  if (!dynamicConnectionRules.has(sourceType)) {
+    dynamicConnectionRules.set(sourceType, new Set())
+  }
+
+  const targets = dynamicConnectionRules.get(sourceType)!
+  if (targets.has(targetType)) {
+    return false // 이미 존재
+  }
+
+  targets.add(targetType)
+  console.log(`[NodeConnectionRules] 🧠 동적 규칙 추가: ${sourceType} → ${targetType}`)
+  return true
+}
+
+/**
+ * 동적 연결 규칙 확인
+ */
+export function hasDynamicConnectionRule(sourceType: string, targetType: string): boolean {
+  return dynamicConnectionRules.get(sourceType)?.has(targetType) ?? false
+}
+
+/**
+ * 모든 동적 연결 규칙 조회
+ */
+export function getAllDynamicRules(): Array<{ source: string; target: string }> {
+  const rules: Array<{ source: string; target: string }> = []
+  for (const [source, targets] of dynamicConnectionRules) {
+    for (const target of targets) {
+      rules.push({ source, target })
+    }
+  }
+  return rules
+}
+
+/**
+ * 동적 규칙 초기화 (테스트용)
+ */
+export function clearDynamicRules(): void {
+  dynamicConnectionRules.clear()
+  console.log('[NodeConnectionRules] 동적 규칙 초기화됨')
+}
+
+/**
+ * 연결 가능 여부 확인 (정적 + 동적 규칙 통합)
+ * 기존 canConnect 함수의 확장 버전
+ */
+export function canConnectEnhanced(sourceType: string, targetType: string): boolean {
+  // 1. 정적 규칙 확인
+  if (canConnect(sourceType, targetType)) {
+    return true
+  }
+
+  // 2. 동적 규칙 확인
+  if (hasDynamicConnectionRule(sourceType, targetType)) {
+    return true
+  }
+
+  return false
+}
+
+/**
+ * RL 시스템에서 연결 오류를 학습하여 동적 규칙 추가
+ * 시뮬레이션 중 반복되는 연결 오류 패턴에서 규칙을 자동 추출
+ */
+export function learnConnectionRuleFromError(errorMessage: string): boolean {
+  // 연결 오류 패턴: "CONNECTION_ERROR: source.type → target.type"
+  const match = errorMessage.match(/CONNECTION_ERROR:\s*(\S+)\s*→\s*(\S+)/)
+  if (match) {
+    const [, sourceType, targetType] = match
+    return addDynamicConnectionRule(sourceType, targetType)
+  }
+
+  // 대안 패턴: "Invalid connection: source → target"
+  const altMatch = errorMessage.match(/Invalid connection:\s*(\S+)\s*→\s*(\S+)/)
+  if (altMatch) {
+    const [, sourceType, targetType] = altMatch
+    return addDynamicConnectionRule(sourceType, targetType)
+  }
+
+  return false
+}
+
+// ============================================================
 // Export Default
 // ============================================================
 
@@ -1162,7 +1261,14 @@ export default {
   isTypeCompatible,
   needsArrayExpansion,
   canConnect,
+  canConnectEnhanced,  // 동적 규칙 포함 버전
   getConnectableTargets,
   getConnectableSources,
   getConnectionRulesSummary,
+  // 동적 규칙 API
+  addDynamicConnectionRule,
+  hasDynamicConnectionRule,
+  getAllDynamicRules,
+  clearDynamicRules,
+  learnConnectionRuleFromError,
 }

@@ -30,6 +30,160 @@ import {
   type WorkflowNode,
   type WorkflowEdge,
 } from './WorkflowValidator'
+import {
+  ReinforcementLearningSystem,
+  RLDatabase,
+  type LearningPattern,
+  type ImprovementProposal,
+  type RLSystemState,
+} from './ReinforcementLearningSystem'
+
+// ============================================================
+// 강화학습 기반 자동 프롬프트 개선 시스템
+// ============================================================
+
+/**
+ * RL 시스템에서 학습된 성공 패턴을 Few-shot 예시로 변환
+ */
+async function generateRLFewShotExamples(): Promise<string> {
+  try {
+    const patterns = await RLDatabase.getPatterns('success')
+    if (patterns.length === 0) return ''
+
+    const topPatterns = patterns.slice(0, 5)
+
+    let examples = '\n\n## 🎯 검증된 성공 패턴 (강화학습 결과)\n\n'
+    examples += '다음 패턴들은 실제 시뮬레이션에서 높은 성공률을 보인 검증된 워크플로우입니다.\n\n'
+
+    for (const pattern of topPatterns) {
+      examples += `### 패턴: ${pattern.pattern}\n`
+      examples += `- 성공 횟수: ${pattern.frequency}회\n`
+      examples += `- 신뢰도: ${(pattern.confidence * 100).toFixed(0)}%\n`
+      examples += `- 추천 사용: ${pattern.suggestedAction}\n\n`
+    }
+
+    return examples
+  } catch (e) {
+    console.warn('[RL Few-shot] 생성 실패:', e)
+    return ''
+  }
+}
+
+/**
+ * RL 시스템에서 학습된 실패 패턴을 경고로 변환
+ */
+async function generateRLFailureWarnings(): Promise<string> {
+  try {
+    const patterns = await RLDatabase.getPatterns('failure')
+    if (patterns.length === 0) return ''
+
+    const topFailures = patterns.slice(0, 10)
+
+    let warnings = '\n\n## ⚠️ 피해야 할 패턴 (강화학습 경고)\n\n'
+    warnings += '다음 패턴들은 실제 시뮬레이션에서 반복적으로 실패한 패턴입니다. **절대 사용하지 마세요.**\n\n'
+
+    for (const pattern of topFailures) {
+      warnings += `- ❌ ${pattern.pattern} (${pattern.frequency}회 실패)\n`
+      if (pattern.suggestedAction) {
+        warnings += `  - 해결책: ${pattern.suggestedAction}\n`
+      }
+    }
+
+    return warnings
+  } catch (e) {
+    console.warn('[RL Warnings] 생성 실패:', e)
+    return ''
+  }
+}
+
+/**
+ * RL 시스템에서 대기 중인 개선안을 시스템 프롬프트에 적용
+ */
+async function applyRLImprovementProposals(): Promise<string> {
+  try {
+    const proposals = await ReinforcementLearningSystem.getPendingProposals()
+    if (proposals.length === 0) return ''
+
+    let additions = '\n\n## 🔧 자동 개선사항 (강화학습 제안)\n\n'
+
+    for (const proposal of proposals.slice(0, 5)) {
+      if (proposal.area === 'system_prompt' && proposal.proposedChange) {
+        additions += `### ${proposal.rationale}\n`
+        additions += `${proposal.proposedChange}\n\n`
+
+        // 적용됨 상태로 업데이트
+        await ReinforcementLearningSystem.applyProposal(proposal.id)
+      }
+    }
+
+    return additions
+  } catch (e) {
+    console.warn('[RL Proposals] 적용 실패:', e)
+    return ''
+  }
+}
+
+/**
+ * RL 시스템의 현재 성능 지표를 시스템 프롬프트에 추가
+ */
+async function generateRLPerformanceContext(): Promise<string> {
+  try {
+    const state = await ReinforcementLearningSystem.getSystemState()
+    if (state.totalFeedbacks === 0) return ''
+
+    let context = '\n\n## 📊 현재 시스템 성능 (실시간)\n\n'
+    context += `- 총 피드백: ${state.totalFeedbacks}건\n`
+    context += `- 성공률: ${state.successRate.toFixed(1)}%\n`
+    context += `- 평균 NotebookLM 점수: ${state.avgScores.notebookLM.toFixed(1)}/100\n`
+
+    // 성공률이 낮으면 추가 경고
+    if (state.successRate < 70) {
+      context += '\n⚠️ **성공률이 낮습니다.** 다음 사항을 특히 주의하세요:\n'
+      for (const fp of state.topFailurePatterns.slice(0, 3)) {
+        context += `- ${fp.pattern} (${fp.count}회)\n`
+      }
+    }
+
+    // NotebookLM 점수 목표 강조
+    if (state.avgScores.notebookLM < 80) {
+      context += '\n🎯 **목표: NotebookLM 능가** - 추론 능력과 결과물 품질을 높이세요.\n'
+      context += '- 단순 나열 대신 논리적 추론과 근거를 제시하세요.\n'
+      context += '- 워크플로우의 각 단계가 왜 필요한지 명확히 설계하세요.\n'
+    }
+
+    return context
+  } catch (e) {
+    console.warn('[RL Context] 생성 실패:', e)
+    return ''
+  }
+}
+
+/**
+ * 전체 RL 기반 프롬프트 보강 (모든 학습 결과 통합)
+ */
+async function enhanceSystemPromptWithRL(basePrompt: string): Promise<string> {
+  let enhancedPrompt = basePrompt
+
+  // 1. 성능 컨텍스트 추가
+  enhancedPrompt += await generateRLPerformanceContext()
+
+  // 2. 검증된 성공 패턴 Few-shot 추가
+  enhancedPrompt += await generateRLFewShotExamples()
+
+  // 3. 실패 패턴 경고 추가
+  enhancedPrompt += await generateRLFailureWarnings()
+
+  // 4. 대기 중인 개선안 적용
+  enhancedPrompt += await applyRLImprovementProposals()
+
+  // 5. 학습 인사이트 추가
+  const insights = await ReinforcementLearningSystem.generateLearningInsights()
+  if (insights) {
+    enhancedPrompt += '\n\n' + insights
+  }
+
+  return enhancedPrompt
+}
 
 // ============================================================
 // LLM 호출
@@ -75,11 +229,11 @@ export async function generateWorkflowFromChat(
   }
 
   // ════════════════════════════════════════════════════════════
-  // 2단계: 시스템 프롬프트 구성
+  // 2단계: 시스템 프롬프트 구성 (강화학습 통합)
   // ════════════════════════════════════════════════════════════
   let systemPrompt = generateSystemPrompt()
 
-  // 학습 데이터 기반 시스템 프롬프트 보강
+  // 기존 학습 데이터 기반 시스템 프롬프트 보강
   systemPrompt = enhanceSystemPrompt(systemPrompt)
 
   // 유사한 성공 사례 Few-shot 예시 추가
@@ -88,10 +242,18 @@ export async function generateWorkflowFromChat(
     systemPrompt += '\n' + fewShotExamples
   }
 
+  // 🎯 강화학습 시스템 통합 - 학습 결과를 시스템 프롬프트에 자동 반영
+  try {
+    systemPrompt = await enhanceSystemPromptWithRL(systemPrompt)
+    console.log('[WorkflowOrchestrator] ✅ 강화학습 결과 시스템 프롬프트에 통합됨')
+  } catch (rlError) {
+    console.warn('[WorkflowOrchestrator] RL 통합 실패 (폴백):', rlError)
+  }
+
   // 프롬프트 분석 결과 기반 힌트 추가
   systemPrompt += generateAnalysisHints(promptAnalysis)
 
-  // 학습 통계 로깅
+  // 학습 통계 로깅 (기존 + RL 통합)
   const stats = getLearningStats()
   if (stats.totalFeedbacks > 0) {
     console.log('[WorkflowOrchestrator] 학습 통계:', {
@@ -99,6 +261,22 @@ export async function generateWorkflowFromChat(
       성공률: `${(stats.successRate * 100).toFixed(0)}%`,
       평균대화턴: stats.avgConversationTurns.toFixed(1),
     })
+  }
+
+  // RL 시스템 상태 로깅
+  try {
+    const rlState = await ReinforcementLearningSystem.getSystemState()
+    if (rlState.totalFeedbacks > 0) {
+      console.log('[WorkflowOrchestrator] 🧠 강화학습 상태:', {
+        총피드백: rlState.totalFeedbacks,
+        성공률: `${rlState.successRate.toFixed(1)}%`,
+        평균NotebookLM점수: rlState.avgScores.notebookLM.toFixed(1),
+        대기제안: rlState.pendingProposals,
+        적용개선: rlState.appliedImprovements,
+      })
+    }
+  } catch (e) {
+    // RL 상태 로깅 실패는 무시
   }
 
   // ════════════════════════════════════════════════════════════

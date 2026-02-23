@@ -1769,24 +1769,24 @@ export class WorkflowSimulator {
           consecutiveFailures = 0
 
           // 🎯 강화학습: 성공 패턴 기록
-          if (result.generatedWorkflow) {
+          if (result.workflow) {
             try {
               const { SuccessPatternLearningSystem } = await import('../services/IntegratedWorkflowAgent')
               await SuccessPatternLearningSystem.recordSuccess(
                 result.prompt,
-                result.generatedWorkflow.nodes || [],
-                result.generatedWorkflow.edges || [],
+                result.workflow.nodes || [],
+                result.workflow.edges || [],
               )
 
               // RL 시스템에 전체 피드백 기록
               const { ReinforcementLearningSystem } = await import('../services/ReinforcementLearningSystem')
               await ReinforcementLearningSystem.recordFeedback({
                 prompt: result.prompt,
-                promptCategory: result.promptCategory,
+                promptCategory: result.scenarioCategory,
                 success: true,
                 nodeTypes: result.usedNodeTypes || [],
-                edgeCount: result.generatedWorkflow.edges?.length || 0,
-                nodeCount: result.generatedWorkflow.nodes?.length || 0,
+                edgeCount: result.workflow.edges?.length || 0,
+                nodeCount: result.workflow.nodes?.length || 0,
                 scores: {
                   xai: result.xaiEvaluation?.totalScore || 0,
                   competitor: result.competitorComparison?.totalScore || 0,
@@ -1860,12 +1860,12 @@ export class WorkflowSimulator {
 
             await ReinforcementLearningSystem.recordFeedback({
               prompt: result.prompt,
-              promptCategory: result.promptCategory,
+              promptCategory: result.scenarioCategory,
               success: false,
               failureReason: failReason,
               nodeTypes: result.usedNodeTypes || [],
-              edgeCount: result.generatedWorkflow?.edges?.length || 0,
-              nodeCount: result.generatedWorkflow?.nodes?.length || 0,
+              edgeCount: result.workflow?.edges?.length || 0,
+              nodeCount: result.workflow?.nodes?.length || 0,
               scores: {
                 xai: result.xaiEvaluation?.totalScore || 0,
                 competitor: result.competitorComparison?.totalScore || 0,
