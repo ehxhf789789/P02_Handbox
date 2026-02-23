@@ -123,10 +123,10 @@ const executor: NodeExecutor = {
         }
 
         const vectorResults = await invoke<VectorSearchResult[]>('vector_search', {
-          db_path: dbPath,
-          index_name: indexName,
-          query_vector: queryEmbedding,
-          top_k: topK,
+          dbPath: dbPath,
+          indexName: indexName,
+          queryVector: queryEmbedding,
+          topK: topK,
           threshold,
         })
 
@@ -152,10 +152,10 @@ const executor: NodeExecutor = {
         }
 
         const keywordResults = await invoke<VectorSearchResult[]>('vector_text_search', {
-          db_path: dbPath,
-          index_name: indexName,
+          dbPath: dbPath,
+          indexName: indexName,
           query: query,
-          top_k: topK,
+          topK: topK,
         }).then(results => results.map(vr => ({
           content: vr.text || '',
           score: vr.score,

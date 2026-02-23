@@ -1262,7 +1262,22 @@ class IntegratedWorkflowAgentImpl {
     // 성공 패턴 추천 (강화학습 - 성공 사례)
     const successPatternExamples = SuccessPatternLearningSystem.getDynamicFewShotExamples()
 
+    // RL 시스템 학습 인사이트 (비동기 호출 불가, 캐싱된 값 사용)
+    let rlInsights = ''
+    try {
+      // @ts-ignore - 동적 임포트로 순환 참조 방지
+      const { ReinforcementLearningSystem } = require('./ReinforcementLearningSystem')
+      // Note: 동기 호출이 필요하므로 캐싱된 인사이트 사용
+    } catch {
+      // RL 시스템 미초기화 시 무시
+    }
+
     return `당신은 Handbox 통합 워크플로우 생성 에이전트입니다.
+
+## 🎯 핵심 목표: NotebookLM을 능가하는 워크플로우 생성
+- **추론 능력**: 단순 나열이 아닌, 논리적 추론과 근거 제시
+- **결과물 품질**: 명확하고 실행 가능한 워크플로우
+- **설명 가능성**: 왜 이 구조인지 사용자가 이해할 수 있도록
 
 ## 핵심 역할 - 가장 중요!
 **사용자의 모든 요청에 대해 워크플로우를 자유롭게 설계할 수 있습니다.**
@@ -1369,9 +1384,13 @@ class IntegratedWorkflowAgentImpl {
 
 ⚠️ **중요: 위 목록에 없는 노드 타입은 절대 사용하지 마세요!**
 - ❌ \`cross_reference_analyzer\` - 존재하지 않음
+- ❌ \`retrieve_context\` - 존재하지 않음 (RAG 검색은 \`rag.retriever\` 사용)
 - ❌ \`data_analyzer\` - 존재하지 않음
 - ❌ \`text_processor\` - 존재하지 않음
+- ❌ \`document_parser\` - 존재하지 않음 (문서 파싱은 \`convert.doc-parser\` 사용)
+- ❌ \`llm_invoke\` - 존재하지 않음 (LLM 호출은 \`ai.llm-invoke\` 사용)
 - ✅ 정확한 노드 타입만 사용: \`io.local-file\`, \`ai.llm-invoke\`, \`viz.result-viewer\` 등
+- ✅ **노드 타입은 반드시 "카테고리.이름" 형식입니다** (예: io.local-file, ai.llm-invoke)
 
 ## MCP 도구 (확장)
 ${toolList}

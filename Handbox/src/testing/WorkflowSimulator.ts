@@ -1777,8 +1777,27 @@ export class WorkflowSimulator {
                 result.generatedWorkflow.nodes || [],
                 result.generatedWorkflow.edges || [],
               )
+
+              // RL 시스템에 전체 피드백 기록
+              const { ReinforcementLearningSystem } = await import('../services/ReinforcementLearningSystem')
+              await ReinforcementLearningSystem.recordFeedback({
+                prompt: result.prompt,
+                promptCategory: result.promptCategory,
+                success: true,
+                nodeTypes: result.usedNodeTypes || [],
+                edgeCount: result.generatedWorkflow.edges?.length || 0,
+                nodeCount: result.generatedWorkflow.nodes?.length || 0,
+                scores: {
+                  xai: result.xaiEvaluation?.totalScore || 0,
+                  competitor: result.competitorComparison?.totalScore || 0,
+                  notebookLM: result.notebookLMComparison?.totalScore || 0,
+                  timeEfficiency: result.complexityTimeEvaluation?.efficiencyScore || 0,
+                },
+                generationTimeMs: result.generationTimeMs,
+                executionTimeMs: result.executionTimeMs,
+              })
             } catch (e) {
-              console.warn('[RL] 성공 패턴 기록 실패:', e)
+              console.warn('[RL] 성공 피드백 기록 실패:', e)
             }
           }
 
@@ -1821,6 +1840,44 @@ export class WorkflowSimulator {
             this.recordBug(result.prompt, 'OUTPUT_INCOMPLETE', failReason)
           } else if (!result.workflowGenerated) {
             this.recordBug(result.prompt, 'GENERATION_FAILED', failReason)
+          }
+
+          // 🎯 강화학습: 실패 피드백 기록
+          try {
+            const { ReinforcementLearningSystem } = await import('../services/ReinforcementLearningSystem')
+            const errors: Array<{ type: string; detail: string }> = []
+
+            // 오류 정보 수집
+            if (failReason.includes('CONNECTION')) {
+              errors.push({ type: 'CONNECTION', detail: failReason })
+            }
+            if (failReason.includes('UNREGISTERED')) {
+              errors.push({ type: 'UNREGISTERED_NODE', detail: failReason })
+            }
+            if (failReason.includes('SIMULATION_FALLBACK')) {
+              errors.push({ type: 'EXECUTION', detail: failReason })
+            }
+
+            await ReinforcementLearningSystem.recordFeedback({
+              prompt: result.prompt,
+              promptCategory: result.promptCategory,
+              success: false,
+              failureReason: failReason,
+              nodeTypes: result.usedNodeTypes || [],
+              edgeCount: result.generatedWorkflow?.edges?.length || 0,
+              nodeCount: result.generatedWorkflow?.nodes?.length || 0,
+              scores: {
+                xai: result.xaiEvaluation?.totalScore || 0,
+                competitor: result.competitorComparison?.totalScore || 0,
+                notebookLM: result.notebookLMComparison?.totalScore || 0,
+                timeEfficiency: result.complexityTimeEvaluation?.efficiencyScore || 0,
+              },
+              errors,
+              generationTimeMs: result.generationTimeMs,
+              executionTimeMs: result.executionTimeMs,
+            })
+          } catch (e) {
+            // 조용히 실패
           }
 
           // 진행 상황 (실패)
