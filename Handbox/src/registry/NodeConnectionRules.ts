@@ -526,7 +526,7 @@ export const NODE_PORT_REGISTRY: Record<string, NodePortInfo> = {
       { name: 'summary', type: 'text' },
     ],
     canConnectTo: [
-      'viz.result-viewer', 'viz.chart', 'viz.stats', 'export.excel',
+      'viz.result-viewer', 'viz.chart', 'viz.stats', 'viz.table', 'export.excel',
       'ai.llm-invoke',       // 투표 결과 분석/후처리
       'data.preprocess',     // 결과 전처리
       'prompt.template',     // 결과를 프롬프트에 사용
@@ -603,6 +603,7 @@ export const NODE_PORT_REGISTRY: Record<string, NodePortInfo> = {
     canReceiveFrom: [
       'ai.llm-invoke', 'data.preprocess', 'control.voting-aggregator', 'viz.stats', 'control.merge',
       'api.http-request', 'api.web-search', 'api.data-fetch',  // API 결과 차트 표시
+      'control.script',  // 스크립트 결과 차트 표시
     ],
   },
 
@@ -620,6 +621,7 @@ export const NODE_PORT_REGISTRY: Record<string, NodePortInfo> = {
     canReceiveFrom: [
       'ai.llm-invoke', 'data.preprocess', 'io.local-folder', 'io.local-file', 'convert.doc-parser', 'control.merge',
       'api.http-request', 'api.web-search', 'api.data-fetch',  // API 결과 테이블 표시
+      'control.script', 'control.voting-aggregator',  // 스크립트/투표 결과 테이블 표시
     ],
   },
 
@@ -634,7 +636,7 @@ export const NODE_PORT_REGISTRY: Record<string, NodePortInfo> = {
       { name: 'stats', type: 'json' },
     ],
     canConnectTo: ['viz.chart', 'viz.result-viewer', 'export.excel', 'ai.llm-invoke'],
-    canReceiveFrom: ['ai.llm-invoke', 'control.voting-aggregator', 'data.preprocess', 'viz.chart', 'control.merge'],  // 병합 결과 통계
+    canReceiveFrom: ['ai.llm-invoke', 'control.voting-aggregator', 'data.preprocess', 'viz.chart', 'control.merge', 'control.script'],  // 병합/스크립트 결과 통계
   },
 
   // ============================================================
@@ -871,8 +873,8 @@ export const NODE_PORT_REGISTRY: Record<string, NodePortInfo> = {
       { name: 'result', type: 'any' },
     ],
     canConnectTo: [
-      'ai.llm-invoke', 'viz.result-viewer', 'data.preprocess',
-      'control.merge', 'storage.local',
+      'ai.llm-invoke', 'viz.result-viewer', 'viz.chart', 'viz.table', 'viz.stats',
+      'data.preprocess', 'control.merge', 'storage.local',
       'control.script',       // 스크립트 체인 (순차 실행)
       'control.conditional',  // 조건 분기
       'export.excel',         // 결과 내보내기
