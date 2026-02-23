@@ -1396,7 +1396,8 @@ class IntegratedWorkflowAgentImpl {
 - ❌ \`kb.create\`, \`kb.query\` - Knowledge Base 노드는 없음 (RAG는 \`rag.retriever\` 사용)
 - ❌ \`retrieve\` - 존재하지 않음 (RAG 검색은 \`rag.retriever\` 사용)
 - ❌ \`retrieve_relevant_laws\`, \`analyze_additions\` - 함수 이름 형식 불가! (\`rag.retriever\`, \`ai.llm-invoke\` 사용)
-- ❌ \`extract_*\`, \`analyze_*\`, \`process_*\`, \`get_*\` - 함수명 패턴 노드는 존재하지 않음
+- ❌ \`extract_*\`, \`analyze_*\`, \`process_*\`, \`get_*\`, \`search_*\` - 함수명 패턴 노드는 존재하지 않음
+- ❌ \`search_docs\` - 존재하지 않음 (문서 검색은 \`rag.retriever\` 사용)
 - ❌ \`image_analysis\` - 존재하지 않음 (이미지 분석은 \`vision.image-analyzer\` 사용)
 - ❌ \`result_display\` - 존재하지 않음 (결과 표시는 \`viz.result-viewer\` 사용)
 
