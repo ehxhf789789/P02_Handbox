@@ -976,14 +976,19 @@ function calculateExpectedTime(nodeTypes: string[], promptComplexity: number): n
 }
 
 /**
- * 복잡도 대비 시간 효율성 평가 수행
+ * 복잡도 대비 시간 효율성 평가 수행 (v2 - 시뮬레이션 환경 최적화)
  *
- * 강화학습 보상/패널티 시스템:
- * - timeEfficiencyRatio >= 2.0: +5 보너스 (매우 효율적)
- * - timeEfficiencyRatio >= 1.5: +3 보너스 (효율적)
- * - timeEfficiencyRatio >= 1.0: +0 (정상)
- * - timeEfficiencyRatio >= 0.7: -2 패널티 (느림)
- * - timeEfficiencyRatio < 0.7:  -5 패널티 (매우 느림)
+ * 시뮬레이션 환경 특성:
+ * - Bedrock API 호출 지연 (10-60초)
+ * - 네트워크 지연 불규칙
+ * - 실제 프로덕션보다 느린 환경
+ *
+ * 강화학습 보상/패널티 시스템 (v2 - 더 관대):
+ * - timeEfficiencyRatio >= 1.5: +5 보너스 (매우 효율적)
+ * - timeEfficiencyRatio >= 1.0: +3 보너스 (효율적)
+ * - timeEfficiencyRatio >= 0.5: +0 (정상)
+ * - timeEfficiencyRatio >= 0.3: -2 패널티 (느림)
+ * - timeEfficiencyRatio < 0.3:  -3 패널티 (매우 느림, 완화)
  */
 export function evaluateComplexityTimeRatio(
   prompt: string,
@@ -999,43 +1004,44 @@ export function evaluateComplexityTimeRatio(
   // 가중 평균 복잡도 (프롬프트 40%, 워크플로우 60%)
   const totalComplexity = promptComplexityScore * 0.4 + workflowComplexityScore * 0.6
 
-  // 예상 처리 시간 계산
-  const expectedTimeMs = calculateExpectedTime(nodeTypes, promptComplexityScore)
+  // 예상 처리 시간 계산 (v2 - 시뮬레이션 보정 x1.5)
+  const baseExpectedTime = calculateExpectedTime(nodeTypes, promptComplexityScore)
+  const expectedTimeMs = baseExpectedTime * 1.5  // 시뮬레이션 환경 보정
 
   // 시간 효율성 비율 (높을수록 좋음)
   const timeEfficiencyRatio = actualTimeMs > 0 ? expectedTimeMs / actualTimeMs : 0
 
-  // 효율성 점수 (1-10)
+  // 효율성 점수 (1-10) - v2: 더 관대한 기준
   let efficiencyScore: number
   let bonusPenalty: number
   let grade: ComplexityTimeEvaluation['grade']
   let feedback: string
 
-  if (timeEfficiencyRatio >= 2.0) {
+  if (timeEfficiencyRatio >= 1.5) {
     efficiencyScore = 10
     bonusPenalty = 5
     grade = 'exceptional'
     feedback = `🚀 예상보다 ${(timeEfficiencyRatio).toFixed(1)}배 빠름! (+${bonusPenalty}점 보너스)`
-  } else if (timeEfficiencyRatio >= 1.5) {
+  } else if (timeEfficiencyRatio >= 1.0) {
     efficiencyScore = 9
     bonusPenalty = 3
     grade = 'efficient'
-    feedback = `⚡ 효율적 처리 - 예상보다 ${((timeEfficiencyRatio - 1) * 100).toFixed(0)}% 빠름 (+${bonusPenalty}점 보너스)`
-  } else if (timeEfficiencyRatio >= 1.0) {
+    feedback = `⚡ 효율적 처리 (+${bonusPenalty}점 보너스)`
+  } else if (timeEfficiencyRatio >= 0.5) {
     efficiencyScore = 7
     bonusPenalty = 0
     grade = 'normal'
-    feedback = `✅ 정상 범위 내 처리 (예상 시간 준수)`
-  } else if (timeEfficiencyRatio >= 0.7) {
+    feedback = `✅ 정상 범위 내 처리`
+  } else if (timeEfficiencyRatio >= 0.3) {
     efficiencyScore = 5
     bonusPenalty = -2
     grade = 'slow'
-    feedback = `⚠️ 예상보다 ${((1 - timeEfficiencyRatio) * 100).toFixed(0)}% 느림 (${bonusPenalty}점 패널티)`
+    feedback = `⚠️ 예상보다 느림 (${bonusPenalty}점 패널티)`
   } else {
-    efficiencyScore = 3
-    bonusPenalty = -5
+    efficiencyScore = 4
+    bonusPenalty = -3  // -5 → -3 완화
     grade = 'very_slow'
-    feedback = `❌ 심각하게 느림 - 복잡도 대비 처리 시간 초과 (${bonusPenalty}점 패널티)`
+    feedback = `⚠️ 처리 시간 개선 필요 (${bonusPenalty}점 패널티)`
   }
 
   return {

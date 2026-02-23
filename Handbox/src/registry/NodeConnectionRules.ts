@@ -873,10 +873,17 @@ export const NODE_PORT_REGISTRY: Record<string, NodePortInfo> = {
     canConnectTo: [
       'ai.llm-invoke', 'viz.result-viewer', 'data.preprocess',
       'control.merge', 'storage.local',
+      'control.script',       // 스크립트 체인 (순차 실행)
+      'control.conditional',  // 조건 분기
+      'export.excel',         // 결과 내보내기
+      'prompt.template',      // 프롬프트 생성
     ],
     canReceiveFrom: [
       'io.local-file', 'io.local-folder', 'convert.doc-parser',
       'data.preprocess', 'ai.llm-invoke', 'rag.retriever',
+      'control.script',       // 스크립트 체인 (이전 스크립트 결과)
+      'api.http-request',     // API 응답 처리
+      'api.data-fetch',       // 데이터 처리
     ],
   },
 
