@@ -5,7 +5,8 @@
  */
 
 import { NodeRegistry } from '../registry/NodeRegistry'
-import type { NodeDefinition, ConfigField } from '../registry/NodeDefinition'
+import type { NodeDefinition } from '../registry/NodeDefinition'
+import type { ConfigField } from '../engine/types'
 import { areTypesCompatible } from '../utils/nodeDescriptionGenerator'
 
 // ============================================================
@@ -52,11 +53,14 @@ export interface ValidationResult {
 // 타입 변환 매트릭스
 // ============================================================
 
-const TYPE_CONVERTERS: Record<string, Record<string, string>> = {
-  // source type → target type → converter node type
+const TYPE_CONVERTERS: Record<string, Record<string, string | null>> = {
+  // source type → target type → converter node type (null = 직접 호환)
   'json': {
     'text': 'transform.json-stringify',
     'table-data': 'transform.json-query',
+    'file-ref': null,  // JSON에서 경로 추출 가능
+    'evaluation-result[]': null,  // 구조 호환
+    'decision': null,  // 구조 호환
   },
   'text': {
     'json': 'transform.json-parse',
@@ -88,6 +92,30 @@ const TYPE_CONVERTERS: Record<string, Record<string, string>> = {
     'text': 'vision.ocr-advanced',
     'analysis': 'vision.analyze',
     'json': 'vision.extract',
+  },
+  // 평가/투표 관련 타입
+  'agent-output': {
+    'json': null,  // 직접 호환
+    'text': 'transform.json-stringify',
+    'evaluation-result[]': null,  // 구조 호환
+  },
+  'evaluation-result': {
+    'json': null,  // 직접 호환
+    'text': 'transform.json-stringify',
+  },
+  'evaluation-result[]': {
+    'json': null,  // 직접 호환
+    'text': 'transform.json-stringify',
+    'agent-output': null,  // 구조 호환
+  },
+  'voting-result': {
+    'json': null,  // 직접 호환
+    'text': 'transform.json-stringify',
+    'decision': null,  // 구조 호환
+  },
+  'decision': {
+    'text': null,  // 직접 호환 (decision은 text 기반)
+    'json': null,  // 구조 호환
   },
 }
 
@@ -397,6 +425,145 @@ export function insertTypeConverters(
 }
 
 // ============================================================
+// 필수 입력 포트 연결 검증 및 자동 수정
+// ============================================================
+
+/**
+ * 필수 입력 포트가 연결되어 있는지 검증
+ */
+export function validateRequiredInputs(
+  nodes: WorkflowNode[],
+  edges: WorkflowEdge[]
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = []
+
+  // 각 노드의 incoming edges 계산
+  const incomingEdgesMap = new Map<string, WorkflowEdge[]>()
+  for (const edge of edges) {
+    if (!incomingEdgesMap.has(edge.target)) {
+      incomingEdgesMap.set(edge.target, [])
+    }
+    incomingEdgesMap.get(edge.target)!.push(edge)
+  }
+
+  for (const node of nodes) {
+    const def = NodeRegistry.get(node.type)
+    if (!def) continue
+
+    // 필수 입력 포트 확인
+    const requiredInputs = def.ports.inputs.filter(p => p.required)
+    if (requiredInputs.length === 0) continue
+
+    // 이 노드로 들어오는 엣지 확인
+    const incomingEdges = incomingEdgesMap.get(node.id) || []
+
+    if (incomingEdges.length === 0) {
+      issues.push({
+        type: 'error',
+        nodeId: node.id,
+        message: `필수 입력 포트에 연결된 엣지 없음: ${node.type} (필수: ${requiredInputs.map(p => p.name).join(', ')})`,
+        autoFixable: true,  // 소스 노드 자동 추가 가능
+      })
+    } else {
+      // 각 필수 포트에 연결이 있는지 확인 (핸들 기반)
+      for (const reqPort of requiredInputs) {
+        const hasConnection = incomingEdges.some(e =>
+          !e.targetHandle || e.targetHandle === reqPort.name
+        )
+        if (!hasConnection) {
+          issues.push({
+            type: 'warning',
+            nodeId: node.id,
+            message: `필수 포트 '${reqPort.name}'에 명시적 연결 없음 (기본 연결 사용 가능)`,
+            autoFixable: false,
+          })
+        }
+      }
+    }
+  }
+
+  return issues
+}
+
+/**
+ * 필수 입력이 없는 노드에 소스 노드 자동 추가
+ */
+export function fixRequiredInputs(
+  nodes: WorkflowNode[],
+  edges: WorkflowEdge[]
+): {
+  nodes: WorkflowNode[]
+  edges: WorkflowEdge[]
+  insertedNodes: WorkflowNode[]
+} {
+  const newNodes = [...nodes]
+  const newEdges = [...edges]
+  const insertedNodes: WorkflowNode[] = []
+
+  // 각 노드의 incoming edges 계산
+  const incomingEdgesMap = new Map<string, WorkflowEdge[]>()
+  for (const edge of edges) {
+    if (!incomingEdgesMap.has(edge.target)) {
+      incomingEdgesMap.set(edge.target, [])
+    }
+    incomingEdgesMap.get(edge.target)!.push(edge)
+  }
+
+  // 소스 노드 타입 매핑 (입력 타입에 따라)
+  const SOURCE_NODE_MAP: Record<string, string> = {
+    'file-ref': 'io.local-file',
+    'file-ref[]': 'io.local-folder',
+    'text': 'io.local-file',
+    'json': 'data.file-loader',
+    'any': 'io.local-file',
+  }
+
+  for (const node of nodes) {
+    const def = NodeRegistry.get(node.type)
+    if (!def) continue
+
+    const requiredInputs = def.ports.inputs.filter(p => p.required)
+    if (requiredInputs.length === 0) continue
+
+    const incomingEdges = incomingEdgesMap.get(node.id) || []
+    if (incomingEdges.length > 0) continue  // 이미 연결됨
+
+    // 첫 번째 필수 입력 타입에 맞는 소스 노드 추가
+    const firstRequired = requiredInputs[0]
+    const sourceType = SOURCE_NODE_MAP[firstRequired.type] || 'io.local-file'
+
+    const sourceId = `auto_source_${node.id}_${Date.now()}`
+    const sourceNode: WorkflowNode = {
+      id: sourceId,
+      type: sourceType,
+      position: {
+        x: node.position.x - 250,
+        y: node.position.y,
+      },
+      data: {
+        label: `자동 추가: ${sourceType.split('.')[1]}`,
+        config: DEFAULT_VALUES[sourceType] || {},
+      },
+    }
+
+    newNodes.push(sourceNode)
+    insertedNodes.push(sourceNode)
+
+    // 연결 생성
+    newEdges.push({
+      id: `auto_edge_${sourceId}_${node.id}`,
+      source: sourceId,
+      target: node.id,
+      targetHandle: firstRequired.name,
+    })
+
+    console.log(`[WorkflowValidator] 자동 소스 노드 추가: ${sourceType} → ${node.type}`)
+  }
+
+  return { nodes: newNodes, edges: newEdges, insertedNodes }
+}
+
+// ============================================================
 // DAG 검증 (사이클 감지)
 // ============================================================
 
@@ -472,19 +639,30 @@ export function validateWorkflow(
     allIssues.push(...configResult.issues)
   }
 
-  // 2. 타입 호환성 검증
+  // 2. 필수 입력 포트 연결 검증 및 자동 수정
+  const inputIssues = validateRequiredInputs(currentNodes, currentEdges)
+  allIssues.push(...inputIssues)
+
+  if (autoFix && inputIssues.some(i => i.type === 'error' && i.autoFixable)) {
+    const inputFixResult = fixRequiredInputs(currentNodes, currentEdges)
+    currentNodes = inputFixResult.nodes
+    currentEdges = inputFixResult.edges
+    insertedNodes.push(...inputFixResult.insertedNodes)
+  }
+
+  // 3. 타입 호환성 검증
   const typeIssues = validateTypeCompatibility(currentNodes, currentEdges)
   allIssues.push(...typeIssues)
 
-  // 3. 자동 변환 노드 삽입 (타입 불일치가 있고 autoFix가 true인 경우)
+  // 4. 자동 변환 노드 삽입 (타입 불일치가 있고 autoFix가 true인 경우)
   if (autoFix && typeIssues.some(i => i.type === 'error' && i.autoFixable)) {
     const converterResult = insertTypeConverters(currentNodes, currentEdges)
     currentNodes = converterResult.nodes
     currentEdges = converterResult.edges
-    insertedNodes = converterResult.insertedNodes
+    insertedNodes.push(...converterResult.insertedNodes)
   }
 
-  // 4. DAG 검증
+  // 5. DAG 검증
   const dagIssues = validateDAG(currentNodes, currentEdges)
   allIssues.push(...dagIssues)
 

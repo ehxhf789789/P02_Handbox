@@ -7,6 +7,7 @@
 
 import { invoke } from '@tauri-apps/api/tauri'
 import type { CloudProvider, CloudAuthMethod, CloudServiceInfo } from '../../registry/ProviderRegistry'
+import { ProviderRegistry } from '../../registry/ProviderRegistry'
 
 export class AWSCloudProvider implements CloudProvider {
   readonly id = 'aws'
@@ -49,6 +50,22 @@ export class AWSCloudProvider implements CloudProvider {
     try {
       const result = await invoke<{ connected: boolean }>('test_aws_connection')
       this.connected = result.connected
+
+      // AWS 연결 성공 시 BedrockLLMProvider도 자동 연결
+      if (this.connected) {
+        const bedrockProvider = ProviderRegistry.getLLMProvider('bedrock')
+        if (bedrockProvider && !bedrockProvider.isConnected()) {
+          console.log('[AWSCloudProvider] BedrockLLMProvider 자동 연결 시도')
+          await bedrockProvider.connect({})
+        }
+
+        // BedrockEmbeddingProvider도 연결
+        const bedrockEmbedding = ProviderRegistry.getEmbeddingProvider('bedrock-embedding')
+        if (bedrockEmbedding && !bedrockEmbedding.isConnected()) {
+          await bedrockEmbedding.connect({})
+        }
+      }
+
       return this.connected
     } catch {
       this.connected = false

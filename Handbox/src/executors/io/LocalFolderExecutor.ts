@@ -29,11 +29,35 @@ const executor: NodeExecutor = {
   async execute(
     _input: Record<string, any>,
     config: Record<string, any>,
-    _context: ExecutionContext,
+    context: ExecutionContext,
   ): Promise<Record<string, any>> {
     const folderPath = config.folder_path || config.path
     if (!folderPath) {
       return { error: '폴더 경로가 설정되지 않았습니다', status: '경로 미설정', files_loaded: 0 }
+    }
+
+    // 시뮬레이션 모드: mock 데이터 반환
+    const isSimulationPath = folderPath.startsWith('C:/simulation') || folderPath.startsWith('/simulation')
+    if (context.isSimulation || isSimulationPath) {
+      const mockFiles = [
+        { name: 'document1.pdf', path: `${folderPath}/document1.pdf`, size: '1.2 MB', extension: 'pdf' },
+        { name: 'document2.txt', path: `${folderPath}/document2.txt`, size: '45 KB', extension: 'txt' },
+        { name: 'report.docx', path: `${folderPath}/report.docx`, size: '890 KB', extension: 'docx' },
+      ]
+      return {
+        folder_path: folderPath,
+        files_loaded: mockFiles.length,
+        total_files: mockFiles.length,
+        total_size: '2.1 MB',
+        status: `[시뮬레이션] ${mockFiles.length}개 파일 스캔 완료`,
+        files: mockFiles,
+        text: '[시뮬레이션 모드] 샘플 텍스트 내용입니다.\n\n문서1 내용...\n문서2 내용...',
+        file_contents: mockFiles.map(f => ({
+          name: f.name,
+          path: f.path,
+          content: `[시뮬레이션] ${f.name}의 샘플 내용입니다.`,
+        })),
+      }
     }
 
     const extensions = config.file_filter

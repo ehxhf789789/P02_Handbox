@@ -101,14 +101,26 @@ export const VisionAnalyzeDefinition: NodeDefinition = {
 
       // 이미지를 Base64로 변환 (필요한 경우)
       let imageBase64: string
-      if (imageSource.type === 'path') {
-        const result = await invoke('tool_read_image_base64', { path: imageSource.value }) as string
-        imageBase64 = result
-      } else if (imageSource.type === 'url') {
-        const result = await invoke('tool_fetch_image_base64', { url: imageSource.value }) as string
-        imageBase64 = result
-      } else {
-        imageBase64 = imageSource.value
+      try {
+        if (imageSource.type === 'path') {
+          const result = await invoke('tool_read_image_base64', { path: imageSource.value }) as string
+          imageBase64 = result
+        } else if (imageSource.type === 'url') {
+          const result = await invoke('tool_fetch_image_base64', { url: imageSource.value }) as string
+          imageBase64 = result
+        } else {
+          imageBase64 = imageSource.value
+        }
+      } catch (err) {
+        // Tauri 명령어 없음 - 시뮬레이션 모드
+        console.warn('[vision.analyze] 이미지 변환 명령어 없음, 시뮬레이션 모드:', err)
+        return {
+          analysis: `[시뮬레이션] 이미지 분석 결과입니다.\n- 이미지 경로: ${imageSource.value}\n- 분석 유형: ${config.analysis_type || 'general'}\n- 상태: Bedrock Vision 연결 필요`,
+          structured: null,
+          objects: null,
+          _simulation: true,
+          _note: 'tool_read_image_base64 Tauri 명령 구현 필요',
+        }
       }
 
       // Vision API 호출

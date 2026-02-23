@@ -41,6 +41,8 @@ export interface SerializedEdge {
 
 /** 워크플로우 메타데이터 */
 export interface WorkflowMeta {
+  /** 워크플로우 고유 ID (UUID) */
+  id?: string
   name: string
   description: string
   author?: string

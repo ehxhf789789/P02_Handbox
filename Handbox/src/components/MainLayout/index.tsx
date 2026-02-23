@@ -16,15 +16,18 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import AddIcon from '@mui/icons-material/Add'
 import HubIcon from '@mui/icons-material/Hub'
 import WidgetsIcon from '@mui/icons-material/Widgets'
+import SmartToyIcon from '@mui/icons-material/SmartToy'
 import PsychologyIcon from '@mui/icons-material/Psychology'
 import ExtensionIcon from '@mui/icons-material/Extension'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
 import FileDownloadIcon from '@mui/icons-material/FileDownload'
 import LogoutIcon from '@mui/icons-material/Logout'
 import PersonIcon from '@mui/icons-material/Person'
-import BugReportIcon from '@mui/icons-material/BugReport'
+import DataObjectIcon from '@mui/icons-material/DataObject'
 import KeyboardArrowLeftIcon from '@mui/icons-material/KeyboardArrowLeft'
 import TerminalIcon from '@mui/icons-material/Terminal'
+import FolderOpenIcon from '@mui/icons-material/FolderOpen'
+import TuneIcon from '@mui/icons-material/Tune'
 
 import { serializeWorkflow, downloadWorkflow, parseWorkflowJSON, deserializeWorkflow } from '../../utils/workflowSerializer'
 import NodePalette from '../NodePalette'
@@ -62,9 +65,9 @@ interface SavedWorkflow {
 
 function MainLayoutContent() {
   const { awsStatus, logout, setUseAWSConnection, setAWSStatus, aiModelConfig } = useAppStore()
-  const { nodes, edges, selectedNode, setNodes, setEdges, clearWorkflow, updateNode } = useWorkflowStore()
+  const { nodes, edges, selectedNode, setNodes, setEdges, clearWorkflow, updateNode, triggerFitView } = useWorkflowStore()
   const { runWorkflow, isWorkflowRunning, nodeExecutionResults } = useExecutionStore()
-  const { openChat, isOpen: isChatOpen } = useChatStore()
+  const { toggleChat, isOpen: isChatOpen } = useChatStore()
   const [executing, setExecuting] = useState(false)
   const [userMenuAnchor, setUserMenuAnchor] = useState<null | HTMLElement>(null)
   const [logoutDialogOpen, setLogoutDialogOpen] = useState(false)
@@ -307,6 +310,7 @@ function MainLayoutContent() {
         if (loaded.edges) {
           setEdges(loaded.edges.map((e: any) => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.source_handle, targetHandle: e.target_handle })))
         }
+        triggerFitView()
         setSnackbar({ open: true, message: `"${loaded.name}" 불러옴`, severity: 'success' })
       }
     } catch (error) {
@@ -345,11 +349,11 @@ function MainLayoutContent() {
 
   return (
     <Box sx={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-      {/* App Bar - Minimal */}
+      {/* App Bar - Redesigned with clear grouping */}
       <AppBar position="fixed" elevation={0} sx={{ zIndex: (theme) => theme.zIndex.drawer + 1, background: 'linear-gradient(135deg, #0f172a 0%, #064e3b 50%, #0f172a 100%)', borderBottom: '1px solid rgba(16, 185, 129, 0.3)' }}>
-        <Toolbar sx={{ gap: 1, minHeight: '56px !important' }}>
-          {/* Logo */}
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Toolbar sx={{ gap: 0, minHeight: '56px !important', px: 1.5 }}>
+          {/* ============ 로고 영역 ============ */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mr: 2 }}>
             <Box sx={{ width: 32, height: 32, borderRadius: 1.5, background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 15px rgba(16, 185, 129, 0.4)' }}>
               <HubIcon sx={{ fontSize: 18, color: 'white' }} />
             </Box>
@@ -358,148 +362,197 @@ function MainLayoutContent() {
             </Typography>
           </Box>
 
-          {workflowName && (
-            <Chip label={workflowName} size="small" sx={{ ml: 2, background: 'rgba(16, 185, 129, 0.2)', color: '#6ee7b7', borderRadius: 1, height: 24 }} />
-          )}
-
-          {awsStatus?.connected && (
-            <Chip icon={<CloudDoneIcon sx={{ fontSize: 14 }} />} label={awsStatus.region} size="small" sx={{ ml: 1, background: 'rgba(255, 153, 0, 0.15)', color: '#ffb84d', border: '1px solid rgba(255, 153, 0, 0.3)', height: 24, '& .MuiChip-icon': { color: '#ffb84d' } }} />
-          )}
-
-          <Box sx={{ flexGrow: 1 }} />
-
-          {/* 노드 추가 (캔버스에 노드가 있을 때만) */}
-          {!isCanvasEmpty && (
-            <Tooltip title="노드 팔레트">
-              <IconButton
-                onClick={() => setNodePaletteOpen(!nodePaletteOpen)}
-                sx={{
-                  color: nodePaletteOpen ? '#10b981' : 'rgba(255,255,255,0.7)',
-                  '&:hover': { color: '#10b981', background: 'rgba(16, 185, 129, 0.1)' }
-                }}
-              >
-                <WidgetsIcon />
+          {/* ============ 파일 그룹 ============ */}
+          <Box sx={{
+            display: 'flex', alignItems: 'center', gap: 0.5,
+            px: 1, py: 0.5, borderRadius: 1.5,
+            bgcolor: 'rgba(255,255,255,0.03)',
+            border: '1px solid rgba(255,255,255,0.05)',
+          }}>
+            <Tooltip title="새 워크플로우" arrow>
+              <IconButton onClick={handleNewWorkflow} size="small" sx={{ color: 'rgba(255,255,255,0.7)', '&:hover': { color: '#10b981', bgcolor: 'rgba(16, 185, 129, 0.1)' } }}>
+                <AddIcon fontSize="small" />
               </IconButton>
             </Tooltip>
-          )}
-
-          {/* AI 워크플로우 생성 (캔버스에 노드가 있을 때만 표시) */}
-          {!isCanvasEmpty && (
-            <Tooltip title="AI 워크플로우 생성">
-              <IconButton
-                onClick={openChat}
-                sx={{
-                  color: isChatOpen ? '#10b981' : 'rgba(255,255,255,0.7)',
-                  '&:hover': { color: '#10b981', background: 'rgba(16, 185, 129, 0.1)' }
-                }}
-              >
-                <AutoFixHighIcon />
-              </IconButton>
-            </Tooltip>
-          )}
-
-          <Tooltip title="새 워크플로우">
-            <IconButton onClick={handleNewWorkflow} sx={{ color: 'rgba(255,255,255,0.7)', '&:hover': { color: '#10b981', background: 'rgba(16, 185, 129, 0.1)' } }}>
-              <AddIcon />
-            </IconButton>
-          </Tooltip>
-
-          <Tooltip title="워크플로우 가져오기">
-            <IconButton component="label" sx={{ color: 'rgba(255,255,255,0.7)', '&:hover': { color: '#10b981', background: 'rgba(16, 185, 129, 0.1)' } }}>
-              <UploadFileIcon />
-              <input type="file" hidden accept=".json" onChange={(e) => {
-                const file = e.target.files?.[0]
-                if (file) {
-                  const reader = new FileReader()
-                  reader.onload = (event) => {
-                    try {
-                      const jsonStr = event.target?.result as string
-                      const { workflow, validation } = parseWorkflowJSON(jsonStr)
-                      if (!validation.valid) {
-                        setSnackbar({ open: true, message: `검증 실패: ${validation.errors[0]}`, severity: 'error' })
-                        return
+            <Tooltip title="불러오기 (JSON)" arrow>
+              <IconButton component="label" size="small" sx={{ color: 'rgba(255,255,255,0.7)', '&:hover': { color: '#10b981', bgcolor: 'rgba(16, 185, 129, 0.1)' } }}>
+                <FolderOpenIcon fontSize="small" />
+                <input type="file" hidden accept=".json" onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) {
+                    const reader = new FileReader()
+                    reader.onload = (event) => {
+                      try {
+                        const jsonStr = event.target?.result as string
+                        const { workflow, validation } = parseWorkflowJSON(jsonStr)
+                        if (!validation.valid) {
+                          setSnackbar({ open: true, message: `검증 실패: ${validation.errors[0]}`, severity: 'error' })
+                          return
+                        }
+                        const { nodes: importedNodes, edges: importedEdges, meta, id } = deserializeWorkflow(workflow)
+                        setCurrentWorkflowId(id)
+                        setWorkflowName(meta.name)
+                        setWorkflowDescription(meta.description || '')
+                        setNodes(importedNodes)
+                        setEdges(importedEdges)
+                        triggerFitView()
+                        setSnackbar({ open: true, message: `"${meta.name}" 불러옴`, severity: 'success' })
+                      } catch (err) {
+                        setSnackbar({ open: true, message: 'JSON 파싱 실패', severity: 'error' })
                       }
-                      const { nodes: importedNodes, edges: importedEdges, meta, id } = deserializeWorkflow(workflow)
-                      setCurrentWorkflowId(id)
-                      setWorkflowName(meta.name)
-                      setWorkflowDescription(meta.description || '')
-                      setNodes(importedNodes)
-                      setEdges(importedEdges)
-                      setSnackbar({ open: true, message: `"${meta.name}" 불러옴`, severity: 'success' })
-                    } catch (err) {
-                      setSnackbar({ open: true, message: 'JSON 파싱 실패', severity: 'error' })
                     }
+                    reader.readAsText(file)
                   }
-                  reader.readAsText(file)
-                }
-                e.target.value = ''
-              }} />
-            </IconButton>
-          </Tooltip>
-
-          <Tooltip title="저장">
-            <IconButton onClick={() => setSaveDialogOpen(true)} sx={{ color: 'rgba(255,255,255,0.7)', '&:hover': { color: '#10b981', background: 'rgba(16, 185, 129, 0.1)' } }}>
-              <SaveIcon />
-            </IconButton>
-          </Tooltip>
-
-          <Divider orientation="vertical" flexItem sx={{ mx: 1, borderColor: 'rgba(255,255,255,0.1)' }} />
-
-          {/* 실행 버튼 (노드가 있을 때만) */}
-          {!isCanvasEmpty && (
-            <Button
-              variant="contained"
-              startIcon={<PlayArrowIcon />}
-              onClick={handleExecute}
-              disabled={executing || isWorkflowRunning}
-              sx={{ px: 2, py: 0.75, background: (executing || isWorkflowRunning) ? 'rgba(99, 102, 241, 0.5)' : 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)', boxShadow: (executing || isWorkflowRunning) ? 'none' : '0 4px 15px rgba(34, 197, 94, 0.3)', '&:disabled': { background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.3)' } }}
-            >
-              {(executing || isWorkflowRunning) ? '실행 중...' : '실행'}
-            </Button>
-          )}
-
-          <Divider orientation="vertical" flexItem sx={{ mx: 1, borderColor: 'rgba(255,255,255,0.1)' }} />
-
-          {/* 결과 패널 토글 */}
-          {Object.keys(nodeExecutionResults).length > 0 && (
-            <Tooltip title="실행 결과">
-              <IconButton
-                onClick={() => setResultsPanelOpen(!resultsPanelOpen)}
-                sx={{
-                  color: resultsPanelOpen ? '#10b981' : 'rgba(255,255,255,0.7)',
-                  '&:hover': { color: '#10b981', background: 'rgba(16, 185, 129, 0.1)' }
-                }}
-              >
-                <TerminalIcon />
+                  e.target.value = ''
+                }} />
               </IconButton>
             </Tooltip>
+            <Tooltip title="저장" arrow>
+              <IconButton onClick={() => setSaveDialogOpen(true)} size="small" sx={{ color: 'rgba(255,255,255,0.7)', '&:hover': { color: '#10b981', bgcolor: 'rgba(16, 185, 129, 0.1)' } }}>
+                <SaveIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            {workflowName && (
+              <Chip label={workflowName} size="small" sx={{ ml: 0.5, background: 'rgba(16, 185, 129, 0.15)', color: '#6ee7b7', borderRadius: 1, height: 22, fontSize: '0.7rem' }} />
+            )}
+          </Box>
+
+          {/* ============ 편집 그룹 (캔버스에 노드가 있을 때) ============ */}
+          {!isCanvasEmpty && (
+            <Box sx={{
+              display: 'flex', alignItems: 'center', gap: 0.5, ml: 1,
+              px: 1, py: 0.5, borderRadius: 1.5,
+              bgcolor: 'rgba(99, 102, 241, 0.05)',
+              border: '1px solid rgba(99, 102, 241, 0.1)',
+            }}>
+              <Tooltip title="노드 추가 팔레트" arrow>
+                <IconButton
+                  onClick={() => setNodePaletteOpen(!nodePaletteOpen)}
+                  size="small"
+                  sx={{
+                    color: nodePaletteOpen ? '#6366f1' : 'rgba(255,255,255,0.7)',
+                    bgcolor: nodePaletteOpen ? 'rgba(99, 102, 241, 0.15)' : 'transparent',
+                    '&:hover': { color: '#6366f1', bgcolor: 'rgba(99, 102, 241, 0.1)' }
+                  }}
+                >
+                  <WidgetsIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="AI 어시스턴트" arrow>
+                <IconButton
+                  onClick={toggleChat}
+                  size="small"
+                  sx={{
+                    color: isChatOpen ? '#10b981' : 'rgba(255,255,255,0.7)',
+                    bgcolor: isChatOpen ? 'rgba(16, 185, 129, 0.15)' : 'transparent',
+                    '&:hover': { color: '#10b981', bgcolor: 'rgba(16, 185, 129, 0.1)' }
+                  }}
+                >
+                  <AutoFixHighIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </Box>
           )}
 
-          <Tooltip title="AI 모델 설정">
-            <IconButton onClick={() => setAiSettingsOpen(true)} sx={{ color: 'rgba(255,255,255,0.7)', '&:hover': { color: '#fff', background: 'rgba(255,255,255,0.1)' } }}>
-              <PsychologyIcon />
-            </IconButton>
-          </Tooltip>
+          {/* ============ 중앙 상태 표시 ============ */}
+          <Box sx={{ flexGrow: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 1 }}>
+            {awsStatus?.connected && (
+              <Chip
+                icon={<CloudDoneIcon sx={{ fontSize: 12 }} />}
+                label={`AWS ${awsStatus.region}`}
+                size="small"
+                sx={{
+                  background: 'rgba(255, 153, 0, 0.1)',
+                  color: '#ffb84d',
+                  border: '1px solid rgba(255, 153, 0, 0.2)',
+                  height: 22,
+                  fontSize: '0.7rem',
+                  '& .MuiChip-icon': { color: '#ffb84d' }
+                }}
+              />
+            )}
+          </Box>
 
-          <Tooltip title="플러그인">
-            <IconButton onClick={() => setPluginsOpen(true)} sx={{ color: 'rgba(255,255,255,0.7)', '&:hover': { color: '#fff', background: 'rgba(255,255,255,0.1)' } }}>
-              <ExtensionIcon />
-            </IconButton>
-          </Tooltip>
+          {/* ============ 실행 그룹 ============ */}
+          {!isCanvasEmpty && (
+            <Box sx={{
+              display: 'flex', alignItems: 'center', gap: 1, mr: 1,
+              px: 1.5, py: 0.5, borderRadius: 1.5,
+              bgcolor: 'rgba(34, 197, 94, 0.05)',
+              border: '1px solid rgba(34, 197, 94, 0.1)',
+            }}>
+              <Button
+                variant="contained"
+                size="small"
+                startIcon={<PlayArrowIcon sx={{ fontSize: 16 }} />}
+                onClick={handleExecute}
+                disabled={executing || isWorkflowRunning}
+                sx={{
+                  px: 1.5, py: 0.5, fontSize: '0.75rem', fontWeight: 600,
+                  background: (executing || isWorkflowRunning) ? 'rgba(99, 102, 241, 0.5)' : 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
+                  boxShadow: (executing || isWorkflowRunning) ? 'none' : '0 2px 10px rgba(34, 197, 94, 0.3)',
+                  '&:disabled': { background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.3)' }
+                }}
+              >
+                {(executing || isWorkflowRunning) ? '실행 중' : '실행'}
+              </Button>
+              {Object.keys(nodeExecutionResults).length > 0 && (
+                <Tooltip title="실행 결과 보기" arrow>
+                  <IconButton
+                    onClick={() => setResultsPanelOpen(!resultsPanelOpen)}
+                    size="small"
+                    sx={{
+                      color: resultsPanelOpen ? '#22c55e' : 'rgba(255,255,255,0.7)',
+                      bgcolor: resultsPanelOpen ? 'rgba(34, 197, 94, 0.15)' : 'transparent',
+                      '&:hover': { color: '#22c55e', bgcolor: 'rgba(34, 197, 94, 0.1)' }
+                    }}
+                  >
+                    <TerminalIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              )}
+              <Tooltip title="디버그 로그" arrow>
+                <IconButton
+                  onClick={() => setDebuggerOpen(!debuggerOpen)}
+                  size="small"
+                  sx={{
+                    color: debuggerOpen ? '#6366f1' : 'rgba(255,255,255,0.6)',
+                    bgcolor: debuggerOpen ? 'rgba(99, 102, 241, 0.15)' : 'transparent',
+                    '&:hover': { color: '#6366f1', bgcolor: 'rgba(99, 102, 241, 0.1)' }
+                  }}
+                >
+                  <DataObjectIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          )}
 
-          <Tooltip title="디버거">
-            <IconButton onClick={() => setDebuggerOpen(!debuggerOpen)} sx={{ color: debuggerOpen ? '#6366f1' : 'rgba(255,255,255,0.7)', '&:hover': { color: '#fff', background: 'rgba(255,255,255,0.1)' } }}>
-              <BugReportIcon />
-            </IconButton>
-          </Tooltip>
+          {/* ============ 설정 그룹 ============ */}
+          <Box sx={{
+            display: 'flex', alignItems: 'center', gap: 0.5,
+            px: 1, py: 0.5, borderRadius: 1.5,
+            bgcolor: 'rgba(255,255,255,0.03)',
+            border: '1px solid rgba(255,255,255,0.05)',
+          }}>
+            <Tooltip title="AI 모델 설정" arrow>
+              <IconButton onClick={() => setAiSettingsOpen(true)} size="small" sx={{ color: 'rgba(255,255,255,0.7)', '&:hover': { color: '#a78bfa', bgcolor: 'rgba(167, 139, 250, 0.1)' } }}>
+                <SmartToyIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="플러그인 관리" arrow>
+              <IconButton onClick={() => setPluginsOpen(true)} size="small" sx={{ color: 'rgba(255,255,255,0.7)', '&:hover': { color: '#f472b6', bgcolor: 'rgba(244, 114, 182, 0.1)' } }}>
+                <ExtensionIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="환경 설정" arrow>
+              <IconButton onClick={() => setSettingsDialogOpen(true)} size="small" sx={{ color: 'rgba(255,255,255,0.7)', '&:hover': { color: '#94a3b8', bgcolor: 'rgba(148, 163, 184, 0.1)' } }}>
+                <TuneIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Box>
 
-          <Tooltip title="설정">
-            <IconButton onClick={() => setSettingsDialogOpen(true)} sx={{ color: 'rgba(255,255,255,0.7)', '&:hover': { color: '#fff', background: 'rgba(255,255,255,0.1)' } }}>
-              <SettingsIcon />
-            </IconButton>
-          </Tooltip>
-
-          <IconButton onClick={(e) => setUserMenuAnchor(e.currentTarget)} sx={{ color: 'rgba(255,255,255,0.7)', '&:hover': { color: '#fff', background: 'rgba(255,255,255,0.1)' } }}>
+          {/* ============ 사용자 메뉴 ============ */}
+          <IconButton onClick={(e) => setUserMenuAnchor(e.currentTarget)} size="small" sx={{ ml: 1, color: 'rgba(255,255,255,0.7)', '&:hover': { color: '#fff', bgcolor: 'rgba(255,255,255,0.1)' } }}>
             <AccountCircleIcon />
           </IconButton>
 
@@ -599,12 +652,14 @@ function MainLayoutContent() {
         component="main"
         sx={{
           flexGrow: 1,
+          minWidth: 0, // flex item이 shrink할 수 있도록
           mt: '56px',
           height: 'calc(100vh - 56px)',
-          background: '#0f172a',
           display: 'flex',
           flexDirection: 'column',
+          background: '#0f172a',
           position: 'relative',
+          overflow: 'hidden', // 자식 absolute 요소 클리핑
         }}
       >
         {/* 캔버스가 비어있으면 AI 생성기 표시 */}
@@ -612,13 +667,29 @@ function MainLayoutContent() {
           <AIWorkflowGenerator />
         ) : (
           <>
-            {/* 워크플로우 에디터 */}
-            <Box sx={{ flex: 1, position: 'relative' }}>
+            {/* 워크플로우 에디터 - absolute로 전체 영역 채움 */}
+            <Box sx={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: resultsPanelOpen ? resultsPanelHeight : 0,
+              transition: 'bottom 225ms cubic-bezier(0, 0, 0.2, 1)',
+            }}>
               <WorkflowEditor />
             </Box>
 
-            {/* 실행 결과 패널 (하단) */}
-            <Collapse in={resultsPanelOpen}>
+            {/* 실행 결과 패널 (하단) - absolute positioning */}
+            <Collapse
+              in={resultsPanelOpen}
+              sx={{
+                position: 'absolute',
+                bottom: 0,
+                left: 0,
+                right: 0,
+                zIndex: 10,
+              }}
+            >
               <Box
                 sx={{
                   height: resultsPanelHeight,

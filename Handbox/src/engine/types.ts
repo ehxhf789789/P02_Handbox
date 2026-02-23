@@ -17,6 +17,7 @@ export type DataType =
   | 'file-ref[]'       // 파일 경로 배열
   | 'json'             // 구조화 데이터 (Record<string, any>)
   | 'json[]'           // 구조화 데이터 배열
+  | 'array'            // 범용 배열 타입 (json[] 별칭)
   | 'vector'           // 임베딩 벡터 (number[])
   | 'vector[]'         // 벡터 배열
   | 'llm-response'     // LLM 응답 (text + usage + metadata)
@@ -26,28 +27,52 @@ export type DataType =
   | 'table-data'       // 테이블 구조 (headers + rows)
   | 'chart-data'       // 차트 데이터 (labels + datasets)
   | 'storage-ref'      // 저장소 참조 (local/cloud path)
+  | 'document'         // 문서 (PDF, DOCX 등)
+  | 'chunk[]'          // 청크 배열 (텍스트 분할 결과)
+  | 'agent-output'     // 에이전트 출력
+  | 'evaluation-result'    // 단일 평가 결과
+  | 'evaluation-result[]'  // 평가 결과 배열
+  | 'voting-result'    // 투표 집계 결과
+  | 'decision'         // 최종 결정/판정
+  | 'boolean'          // 불리언 값
+  | 'xai-result'       // XAI 분석 결과
   | 'any'              // 타입 무관 (제어 노드, 패스스루 등)
 
 /** 데이터 타입 간 호환성 매트릭스 */
 export const TYPE_COMPATIBILITY: Record<DataType, DataType[]> = {
-  'text':             ['text', 'json', 'any'],  // text → json 허용 (파싱 가능)
-  'text[]':           ['text[]', 'any'],
-  'file-ref':         ['file-ref', 'text', 'any'],
-  'file-ref[]':       ['file-ref[]', 'any'],
-  'json':             ['json', 'text', 'any'],
-  'json[]':           ['json[]', 'any'],
-  'vector':           ['vector', 'any'],
-  'vector[]':         ['vector[]', 'any'],
+  // 기본 타입
+  'text':             ['text', 'json', 'any'],
+  'text[]':           ['text[]', 'chunk[]', 'any', 'json', 'array'],
+  'file-ref':         ['file-ref', 'text', 'any', 'document'],
+  'file-ref[]':       ['file-ref[]', 'any', 'json', 'array'],
+  'json':             ['json', 'text', 'any', 'table-data', 'chart-data', 'search-result[]',
+                       'agent-output', 'file-ref', 'evaluation-result[]', 'decision', 'xai-result'],
+  'json[]':           ['json[]', 'any', 'array'],
+  'array':            ['array', 'json[]', 'text[]', 'any'],
+  'vector':           ['vector', 'vector[]', 'any'],
+  'vector[]':         ['vector[]', 'any', 'array'],
   'llm-response':     ['llm-response', 'text', 'json', 'any'],
-  'search-result[]':  ['search-result[]', 'json[]', 'any'],
+  'search-result[]':  ['search-result[]', 'json[]', 'json', 'any', 'text', 'array'],
   'image':            ['image', 'file-ref', 'any'],
   'binary':           ['binary', 'any'],
   'table-data':       ['table-data', 'json', 'any'],
   'chart-data':       ['chart-data', 'json', 'any'],
   'storage-ref':      ['storage-ref', 'text', 'file-ref', 'any'],
-  'any':              ['text', 'text[]', 'file-ref', 'file-ref[]', 'json', 'json[]',
+  // 새 타입
+  'document':         ['document', 'file-ref', 'any', 'text'],
+  'chunk[]':          ['chunk[]', 'text[]', 'any', 'json', 'array'],
+  'agent-output':     ['agent-output', 'json', 'text', 'any', 'evaluation-result[]'],
+  'evaluation-result':    ['evaluation-result', 'json', 'any'],
+  'evaluation-result[]':  ['evaluation-result[]', 'json', 'any', 'agent-output', 'array'],
+  'voting-result':    ['voting-result', 'json', 'any', 'decision'],
+  'decision':         ['decision', 'text', 'json', 'any'],
+  'boolean':          ['boolean', 'json', 'any', 'text'],
+  'xai-result':       ['xai-result', 'json', 'any'],
+  'any':              ['text', 'text[]', 'file-ref', 'file-ref[]', 'json', 'json[]', 'array',
                        'vector', 'vector[]', 'llm-response', 'search-result[]',
-                       'image', 'binary', 'table-data', 'chart-data', 'storage-ref', 'any'],
+                       'image', 'binary', 'table-data', 'chart-data', 'storage-ref',
+                       'document', 'chunk[]', 'agent-output', 'evaluation-result',
+                       'evaluation-result[]', 'voting-result', 'decision', 'boolean', 'xai-result', 'any'],
 }
 
 /** 출력 타입이 입력 타입에 연결 가능한지 확인 */
@@ -86,10 +111,12 @@ export type ConfigFieldType =
   | 'folder'
   | 'color'
   | 'slider'
-  | 'code'         // 코드 에디터 (프롬프트, JSON 등)
-  | 'key-value'    // key-value 쌍 입력
-  | 'provider'     // 프로바이더 선택 드롭다운 (특수)
-  | 'model'        // 모델 선택 드롭다운 (특수, provider 의존)
+  | 'code'           // 코드 에디터 (프롬프트, JSON 등)
+  | 'key-value'      // key-value 쌍 입력
+  | 'provider'       // 프로바이더 선택 드롭다운 (특수)
+  | 'model'          // 모델 선택 드롭다운 (특수, provider 의존)
+  | 'persona-select' // 페르소나 선택 드롭다운
+  | 'tags'           // 태그 입력 (다중 문자열)
 
 export interface ConfigField {
   key: string
@@ -150,6 +177,8 @@ export interface ExecutionContext {
   abortSignal: AbortSignal
   /** 중단점 노드 ID (설정된 경우 해당 노드에서 중지) */
   breakpointNodeId?: string | null
+  /** 시뮬레이션 모드 플래그 - true면 mock 데이터 반환 */
+  isSimulation?: boolean
 }
 
 // ============================================================
@@ -164,6 +193,7 @@ export type NodeRuntime =
   | 'script'   // 스크립트 실행 (Python, Node.js 등)
   | 'mcp'      // MCP 프로토콜
   | 'internal' // 순수 TypeScript 로직 (제어 흐름, 데이터 변환 등)
+  | 'browser'  // 브라우저 전용 실행 (Web API, IndexedDB 등)
 
 // ============================================================
 // LLM 관련 공통 타입
@@ -177,6 +207,26 @@ export interface LLMRequest {
   maxTokens?: number
   topP?: number
   stopSequences?: string[]
+  /** Vision 모델용 이미지 입력 */
+  images?: Array<{
+    data?: string        // base64 데이터
+    base64?: string      // base64 별칭
+    url?: string         // 이미지 URL
+    mimeType?: string
+    detail?: 'low' | 'high' | 'auto'  // Vision API 상세도
+  }>
+  /** 에이전트용 도구 정의 */
+  tools?: Array<{
+    name: string
+    description: string
+    inputSchema: Record<string, any>
+  }>
+}
+
+export interface LLMToolCall {
+  id: string
+  name: string
+  arguments: Record<string, any>
 }
 
 export interface LLMResponse {
@@ -184,9 +234,12 @@ export interface LLMResponse {
   usage: {
     inputTokens: number
     outputTokens: number
+    totalTokens?: number
   }
   model: string
   finishReason?: string
+  /** 도구 호출 결과 (에이전트 모드) */
+  toolCalls?: LLMToolCall[]
 }
 
 export interface EmbeddingRequest {

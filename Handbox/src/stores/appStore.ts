@@ -150,7 +150,7 @@ const defaultAIModelConfig: AIModelConfig = {
   customModel: '',
   // 공통
   temperature: 0.7,
-  maxTokens: 4096,
+  maxTokens: 8192,  // 대규모 워크플로우 (10명+ 전문가) 기본 지원
 }
 
 // 기본 저장 경로 설정

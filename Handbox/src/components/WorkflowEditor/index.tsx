@@ -158,10 +158,14 @@ const WorkflowEditorInner = memo(function WorkflowEditorInner() {
       'input': InputNode,
       'output': OutputNode,
       'group': GroupNode,
+      // ReactFlow의 기본 타입 - 미등록 노드 타입도 GenericNode로 렌더링
+      'default': GenericNode,
     }
 
     // NodeRegistry에서 모든 노드 타입 가져오기
     const allDefinitions = NodeRegistry.getAll()
+    console.log(`[WorkflowEditor] NodeRegistry에서 ${allDefinitions.length}개 정의 로드`)
+
     for (const def of allDefinitions) {
       if (def.type !== 'input' && def.type !== 'output' && !types[def.type]) {
         types[def.type] = GenericNode
@@ -171,7 +175,11 @@ const WorkflowEditorInner = memo(function WorkflowEditorInner() {
     // dynamicNodeTypes도 병합 (외부에서 추가된 타입)
     Object.assign(types, dynamicNodeTypes)
 
-    console.log(`[WorkflowEditor] nodeTypes 생성 완료: ${Object.keys(types).length}개 타입`)
+    // 등록된 타입 목록 출력 (디버깅)
+    const registeredTypes = Object.keys(types).filter(t => t !== 'default')
+    console.log(`[WorkflowEditor] nodeTypes 생성 완료: ${registeredTypes.length}개 타입`)
+    console.log(`[WorkflowEditor] 샘플 타입: ${registeredTypes.slice(0, 10).join(', ')}...`)
+
     return types
   }, []) // 빈 dependency - 한 번만 생성 (React Flow는 stable nodeTypes 필요)
 
@@ -195,6 +203,7 @@ const WorkflowEditorInner = memo(function WorkflowEditorInner() {
     clearAllExecutionResults,
     executeUntilBreakpoint,
     breakpointNodeId,
+    fitViewTrigger,
   } = useWorkflowStore(
     (state) => ({
       nodes: state.nodes,
@@ -215,9 +224,59 @@ const WorkflowEditorInner = memo(function WorkflowEditorInner() {
       clearAllExecutionResults: state.clearAllExecutionResults,
       executeUntilBreakpoint: state.executeUntilBreakpoint,
       breakpointNodeId: state.breakpointNodeId,
+      fitViewTrigger: state.fitViewTrigger,
     }),
     shallow
   )
+
+  // 노드가 변경될 때 fitView 자동 호출
+  const prevNodesLengthRef = useRef(0)
+
+  useEffect(() => {
+    const prevLength = prevNodesLengthRef.current
+    prevNodesLengthRef.current = nodes.length
+
+    // 노드가 처음 추가될 때 (0 → N) fitView 호출
+    if (nodes.length > 0 && prevLength === 0 && reactFlowInstance.current) {
+      const doFitView = () => {
+        const instance = reactFlowInstance.current
+        if (instance) {
+          console.log('[WorkflowEditor] Auto fitView - nodes added:', nodes.length)
+          instance.fitView({
+            padding: 0.3,
+            minZoom: 0.3,
+            maxZoom: 1.0,
+            duration: 300,
+          })
+        }
+      }
+      // 노드 측정 완료 대기 후 fitView
+      const timer = setTimeout(doFitView, 500)
+      return () => clearTimeout(timer)
+    }
+  }, [nodes.length])
+
+  // fitViewTrigger가 변경되면 fitView 호출 (수동 트리거)
+  useEffect(() => {
+    if (fitViewTrigger > 0 && reactFlowInstance.current) {
+      const doFitView = () => {
+        const instance = reactFlowInstance.current
+        const currentNodes = useWorkflowStore.getState().nodes
+        if (instance && currentNodes.length > 0) {
+          console.log('[WorkflowEditor] Manual fitView - trigger:', fitViewTrigger)
+          instance.fitView({
+            padding: 0.3,
+            minZoom: 0.3,
+            maxZoom: 1.0,
+            duration: 300,
+          })
+        }
+      }
+      // 노드 측정 완료 대기
+      const timer = setTimeout(doFitView, 300)
+      return () => clearTimeout(timer)
+    }
+  }, [fitViewTrigger])
   const { isDragging, dragData, updatePosition, endDrag } = useDragStore(
     (state) => ({ isDragging: state.isDragging, dragData: state.dragData, updatePosition: state.updatePosition, endDrag: state.endDrag }),
     shallow
@@ -231,7 +290,50 @@ const WorkflowEditorInner = memo(function WorkflowEditorInner() {
 
   const onInit = useCallback((instance: ReactFlowInstance) => {
     reactFlowInstance.current = instance
+    console.log('[WorkflowEditor] ReactFlow initialized')
+
+    // 노드가 있으면 fitView 호출
+    const currentNodes = useWorkflowStore.getState().nodes
+    if (currentNodes.length > 0) {
+      setTimeout(() => {
+        instance.fitView({
+          padding: 0.2,
+          minZoom: 0.3,
+          maxZoom: 1.0,
+          duration: 200,
+        })
+      }, 100)
+    }
   }, [])
+
+  // 컨테이너 크기 변경 감지 → fitView 호출
+  useEffect(() => {
+    const wrapper = reactFlowWrapper.current
+    if (!wrapper) return
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (!entry) return
+
+      const { width, height } = entry.contentRect
+      const instance = reactFlowInstance.current
+      const currentNodes = useWorkflowStore.getState().nodes
+
+      if (instance && currentNodes.length > 0 && width > 0 && height > 0) {
+        setTimeout(() => {
+          instance.fitView({
+            padding: 0.2,
+            minZoom: 0.3,
+            maxZoom: 1.0,
+            duration: 200,
+          })
+        }, 50)
+      }
+    })
+
+    resizeObserver.observe(wrapper)
+    return () => resizeObserver.disconnect()
+  }, [nodes.length])
 
   // 포트 타입 호환성 검증 (연결 시도 시 호출)
   const isValidConnection = useCallback((connection: { source: string | null; target: string | null; sourceHandle: string | null; targetHandle: string | null }) => {
@@ -391,6 +493,13 @@ const WorkflowEditorInner = memo(function WorkflowEditorInner() {
         onSelectionChange={onSelectionChange}
         nodeTypes={nodeTypes}
         fitView
+        fitViewOptions={{
+          padding: 0.2,
+          minZoom: 0.3,
+          maxZoom: 1.0,
+        }}
+        minZoom={0.1}
+        maxZoom={2}
         snapToGrid
         snapGrid={[15, 15]}
         selectionOnDrag

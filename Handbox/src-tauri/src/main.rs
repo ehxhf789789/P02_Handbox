@@ -34,6 +34,8 @@ fn main() {
             commands::aws_service::set_bedrock_api_key,
             commands::aws_service::clear_bedrock_api_key,
             commands::aws_service::has_bedrock_api_key,
+            commands::aws_service::vision_analyze,
+            commands::aws_service::generate_image,
 
             // 에이전트 관리
             commands::agent::create_agent,
@@ -120,6 +122,9 @@ fn main() {
             commands::tool_io::tool_file_list,
             commands::tool_io::tool_file_info,
             commands::tool_io::tool_http_request,
+            commands::tool_io::tool_read_image_base64,
+            commands::tool_io::tool_fetch_image_base64,
+            commands::tool_io::tool_image_info,
 
             // Transform 도구
             commands::tool_transform::tool_json_query,
@@ -165,6 +170,31 @@ fn main() {
             // ═══════════════════════════════════════
             commands::workflow_stress_test::run_workflow_stress_test,
             commands::workflow_stress_test::run_node_compatibility_test,
+
+            // ═══════════════════════════════════════
+            // 페르소나 시스템
+            // ═══════════════════════════════════════
+            commands::persona_db::persona_init_db,
+            commands::persona_db::persona_save,
+            commands::persona_db::persona_load,
+            commands::persona_db::persona_list,
+            commands::persona_db::persona_delete,
+            commands::persona_db::persona_toggle_active,
+            commands::persona_db::persona_seed_builtins,
+            commands::persona_db::persona_search,
+            commands::persona_db::evaluation_record_save,
+            commands::persona_db::evaluation_record_list,
+
+            // ═══════════════════════════════════════
+            // 메모리 시스템 (에이전트 학습)
+            // ═══════════════════════════════════════
+            commands::memory_db::memory_db_execute,
+            commands::memory_db::memory_db_query,
+            commands::memory_db::read_text_file,
+            commands::memory_db::write_text_file,
+            commands::memory_db::list_directory,
+            commands::memory_db::memory_execute_python,
+            commands::memory_db::memory_execute_shell,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

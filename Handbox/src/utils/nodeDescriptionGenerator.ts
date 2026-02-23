@@ -20,27 +20,28 @@ import type { PortDefinition, ConfigField } from '../engine/types'
 // ============================================================
 
 const TYPE_COMPATIBILITY: Record<string, string[]> = {
-  // 기본 타입
-  'text': ['text', 'any', 'llm-response', 'analysis', 'report'],
-  'json': ['json', 'any', 'table-data', 'chart-data', 'search-result[]', 'structured-data', 'evaluation', 'ml-result', 'agent-output'],
-  'any': ['text', 'json', 'file-ref', 'vector', 'vector[]', 'text[]', 'chunk[]', 'table-data', 'chart-data', 'search-result[]', 'llm-response', 'image', 'image[]', 'analysis', 'evaluation', 'ml-result', 'agent-output', 'document', 'structured-data'],
+  // 기본 타입 (넓은 호환성)
+  'text': ['text', 'any', 'llm-response', 'analysis', 'report', 'json'],
+  'json': ['json', 'any', 'table-data', 'chart-data', 'search-result[]', 'structured-data', 'evaluation', 'ml-result', 'agent-output', 'file-ref', 'text', 'evaluation-result[]', 'decision'],
+  'any': ['text', 'json', 'file-ref', 'vector', 'vector[]', 'text[]', 'chunk[]', 'table-data', 'chart-data', 'search-result[]', 'llm-response', 'image', 'image[]', 'analysis', 'evaluation', 'ml-result', 'agent-output', 'document', 'structured-data', 'evaluation-result[]', 'decision', 'voting-result'],
 
-  // 파일 관련
+  // 파일 관련 (json도 file-ref로 변환 가능 - 경로 추출)
   'file-ref': ['file-ref', 'text', 'any', 'image', 'document'],
-  'document': ['document', 'file-ref', 'any'],
+  'file-ref[]': ['file-ref[]', 'any', 'json'],
+  'document': ['document', 'file-ref', 'any', 'text'],
 
   // 배열 타입
-  'text[]': ['text[]', 'chunk[]', 'any'],
-  'chunk[]': ['chunk[]', 'text[]', 'any'],
+  'text[]': ['text[]', 'chunk[]', 'any', 'json'],
+  'chunk[]': ['chunk[]', 'text[]', 'any', 'json'],
   'vector[]': ['vector[]', 'any'],
-  'search-result[]': ['search-result[]', 'json', 'any'],
+  'search-result[]': ['search-result[]', 'json', 'any', 'text'],
   'image[]': ['image[]', 'any', 'file-ref[]'],
 
   // 벡터 타입
   'vector': ['vector', 'vector[]', 'any'],
 
   // LLM 관련
-  'llm-response': ['llm-response', 'text', 'any', 'analysis'],
+  'llm-response': ['llm-response', 'text', 'any', 'analysis', 'json'],
 
   // 시각화 타입
   'table-data': ['table-data', 'json', 'any'],
@@ -49,14 +50,20 @@ const TYPE_COMPATIBILITY: Record<string, string[]> = {
   // Vision/VLM 타입
   'image': ['image', 'file-ref', 'any', 'image[]'],
   'analysis': ['analysis', 'text', 'json', 'any'],
-  'evaluation': ['evaluation', 'json', 'any'],
+  'evaluation': ['evaluation', 'json', 'any', 'evaluation-result[]'],
   'benchmark-result': ['benchmark-result', 'json', 'evaluation', 'any'],
   'ocr-result': ['ocr-result', 'text', 'json', 'any'],
 
   // Agent 타입
-  'agent-output': ['agent-output', 'json', 'text', 'any'],
+  'agent-output': ['agent-output', 'json', 'text', 'any', 'evaluation-result[]'],
   'plan': ['plan', 'json', 'any'],
   'tool-call': ['tool-call', 'json', 'any'],
+
+  // 평가/투표 타입 (신규)
+  'evaluation-result': ['evaluation-result', 'json', 'any'],
+  'evaluation-result[]': ['evaluation-result[]', 'json', 'any', 'agent-output'],
+  'voting-result': ['voting-result', 'json', 'any', 'decision'],
+  'decision': ['decision', 'text', 'json', 'any'],
 
   // ML 타입
   'ml-result': ['ml-result', 'json', 'any', 'table-data'],
@@ -1251,51 +1258,37 @@ interface Workflow {
 }
 \`\`\`
 
-## 응답 형식 (단계별)
+## 응답 형식
 
-### 1. 요구사항 분석 (상세)
-사용자 요청을 분석하고 필요한 정보가 부족하면 구체적으로 질문합니다:
-- "처리할 파일의 형식은 무엇인가요? (PDF, Excel, 이미지 등)"
-- "결과를 어떤 형식으로 원하시나요? (텍스트, 차트, 보고서, 엑셀 등)"
-- "LLM 분석이 필요한가요? 필요하다면 어떤 분석을 원하시나요?"
-- "에이전트 기반 자율 처리가 필요한가요?"
-- "ML 알고리즘이 필요한가요? (분류, 클러스터링, 예측 등)"
+### 1. 정보가 부족할 때: 역질문
+요구사항이 불명확하면 **구체적인 질문**으로 구체화합니다:
+- "평가위원은 몇 명이 필요한가요?"
+- "합격 기준 점수는 몇 점인가요?"
+- "결과를 어떤 형식으로 원하시나요? (보고서, 엑셀, JSON)"
 
-### 2. 설계 설명 (상세)
-워크플로우를 생성하기 전에 설계를 상세히 설명합니다:
-- 전체 아키텍처 다이어그램 (ASCII)
-- 각 노드의 역할과 선택 이유
-- 데이터 흐름 (A → B → C)
-- 주요 설정 값과 튜닝 근거
-- 예상 실행 시간 및 리소스 사용
-- 대안 접근법 (있다면)
+역질문은 워크플로우 품질을 위해 중요합니다. 충분한 정보를 얻을 때까지 질문하세요.
 
-### 3. 워크플로우 생성 (정밀)
-설계가 확정되면 정확한 JSON을 생성합니다:
-- 모든 필수 필드 포함
-- 권장 설정 값 명시
-- 상세 주석 (description)
-- 에러 처리 설정
+### 2. 정보가 충분할 때: 워크플로우 생성
+
+**응답 텍스트는 1-2문장으로 간결하게** 작성하세요.
+워크플로우는 UI에서 미리보기로 표시되므로 긴 설명이 필요 없습니다.
+
+응답 예시:
+"10명의 AI 평가위원이 RAG 검색 후 2/3 다수결로 심사하는 워크플로우를 생성했습니다."
+
+**중요**: JSON은 \`\`\`json 코드 블록으로 생성해야 시스템이 추출할 수 있습니다.
+하지만 사용자에게 JSON 내용을 설명할 필요는 없습니다 - UI가 보여줍니다.
 
 \`\`\`json
-{
-  "version": "2.0.0",
-  "id": "wf_generated_1708123456",
-  "meta": {
-    "name": "워크플로우 이름",
-    "description": "상세 설명",
-    "tags": ["태그1", "태그2"],
-    "complexity": "moderate",
-    "estimatedDuration": "약 30초"
-  },
-  ...
-}
+{ "version": "2.0.0", "nodes": [...], "edges": [...] }
 \`\`\`
 
-### 4. 검증 및 최적화 제안
-- 생성된 워크플로우의 잠재적 문제점
-- 성능 개선 가능 지점
-- 대안 구성 제안
+**절대 하지 말 것:**
+- 단계별 설계 설명 ("1단계: 파일 읽기, 2단계: 분석...")
+- ASCII 아키텍처 다이어그램
+- "설계 설명:", "아키텍처:" 같은 섹션
+- JSON 구조에 대한 장황한 설명
+- 불완전한 JSON (반드시 끝까지 생성)
 
 ## 중요 제약사항
 

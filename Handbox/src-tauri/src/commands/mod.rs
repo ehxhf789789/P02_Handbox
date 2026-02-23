@@ -26,5 +26,11 @@ pub mod plugin_manager;
 // === 테스트 및 검증 시스템 ===
 pub mod workflow_stress_test;
 
+// === 페르소나 시스템 ===
+pub mod persona_db;
+
+// === 메모리 시스템 (에이전트 학습) ===
+pub mod memory_db;
+
 #[cfg(test)]
 mod workflow_test;

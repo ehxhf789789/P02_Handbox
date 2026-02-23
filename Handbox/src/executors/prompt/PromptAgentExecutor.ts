@@ -2,9 +2,17 @@
  * PromptAgentExecutor - AI-powered prompt generation
  *
  * Takes a short command and generates an optimized detailed prompt
+ *
+ * 지원 프로바이더:
+ * - bedrock: AWS Bedrock Claude (우선)
+ * - local: Ollama, LM Studio (OpenAI 호환)
+ *
+ * 우선순위: bedrock → local → fallback
  */
 
 import { invoke } from '@tauri-apps/api/tauri'
+import { LocalLLMProvider, configureOllama } from '../../services/LocalLLMProvider'
+import { ProviderRegistry } from '../../registry/ProviderRegistry'
 import type { NodeExecutor, NodeDefinition } from '../../registry/NodeDefinition'
 import type { ExecutionContext } from '../../engine/types'
 
@@ -87,29 +95,103 @@ const executor: NodeExecutor = {
       }
     }
 
-    try {
-      const template = PROMPT_GENERATION_TEMPLATES[style] || PROMPT_GENERATION_TEMPLATES.detailed
-      const metaPrompt = template
-        .replace('{{command}}', command)
-        .replace('{{input}}', '{{input}}') // Keep placeholder for few-shot
+    const template = PROMPT_GENERATION_TEMPLATES[style] || PROMPT_GENERATION_TEMPLATES.detailed
+    const metaPrompt = template
+      .replace('{{command}}', command)
+      .replace('{{input}}', '{{input}}') // Keep placeholder for few-shot
 
-      // Call LLM to generate the prompt
-      const result = await invoke<{ response: string; usage?: { inputTokens: number; outputTokens: number } }>('invoke_bedrock', {
-        modelId: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
-        prompt: metaPrompt,
-        systemPrompt: language === 'ko'
-          ? '당신은 AI 프롬프트 엔지니어링 전문가입니다. 한국어로 응답하세요.'
-          : 'You are an expert AI prompt engineer. Respond in English.',
-        temperature: 0.7,
-        maxTokens: 1000,
-      })
+    const systemPrompt = language === 'ko'
+      ? '당신은 AI 프롬프트 엔지니어링 전문가입니다. 한국어로 응답하세요.'
+      : 'You are an expert AI prompt engineer. Respond in English.'
+
+    const provider = (config.provider as string) || 'auto'
+    let responseText = ''
+    let usedProvider = provider
+
+    try {
+      // 1. ProviderRegistry 확인
+      const registeredProvider = ProviderRegistry.getLLMProvider()
+      if (registeredProvider && registeredProvider.isConnected()) {
+        const response = await registeredProvider.invoke({
+          model: '',
+          prompt: metaPrompt,
+          systemPrompt,
+          maxTokens: 1000,
+          temperature: 0.7,
+        })
+        responseText = response.text
+        usedProvider = registeredProvider.id
+      }
+      // 2. Bedrock 우선 시도
+      else if (provider === 'bedrock' || provider === 'auto') {
+        try {
+          console.log('[PromptAgent] Bedrock 시도')
+          const bedrockResult = await invoke<{ response: string }>('invoke_bedrock', {
+            request: {
+              model_id: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
+              prompt: metaPrompt,
+              system_prompt: systemPrompt,
+              temperature: 0.7,
+              max_tokens: 1000,
+            },
+          })
+          responseText = bedrockResult.response
+          usedProvider = 'bedrock'
+        } catch (bedrockError) {
+          console.warn('[PromptAgent] Bedrock 실패:', bedrockError)
+
+          if (provider === 'auto') {
+            // 3. 로컬 LLM 폴백
+            try {
+              console.log('[PromptAgent] 로컬 LLM 폴백 시도')
+              if (!LocalLLMProvider.getConfig()) {
+                configureOllama()
+              }
+              const localResponse = await LocalLLMProvider.generate({
+                prompt: metaPrompt,
+                systemPrompt,
+                temperature: 0.7,
+                maxTokens: 1000,
+              })
+
+              // 시뮬레이션 응답 감지
+              if (localResponse.model === 'simulation') {
+                throw new Error('시뮬레이션 응답 감지')
+              }
+
+              responseText = localResponse.content
+              usedProvider = 'local'
+            } catch (localError) {
+              console.warn('[PromptAgent] 로컬 LLM도 실패:', localError)
+              throw bedrockError  // 원래 Bedrock 에러 전파
+            }
+          } else {
+            throw bedrockError
+          }
+        }
+      }
+      // 3. 로컬 LLM 직접 호출
+      else if (provider === 'local') {
+        console.log('[PromptAgent] 로컬 LLM 사용')
+        if (!LocalLLMProvider.getConfig()) {
+          configureOllama()
+        }
+        const localResponse = await LocalLLMProvider.generate({
+          prompt: metaPrompt,
+          systemPrompt,
+          temperature: 0.7,
+          maxTokens: 1000,
+        })
+        responseText = localResponse.content
+        usedProvider = 'local'
+      }
 
       return {
-        prompt: result.response,
+        prompt: responseText,
         original_command: command,
         style,
         language,
-        tokens_used: result.usage,
+        provider: usedProvider,
       }
     } catch (error) {
       // Fallback: Return a simple formatted prompt
@@ -144,6 +226,17 @@ export const PromptAgentDefinition: NodeDefinition = {
   },
   configSchema: [
     { key: 'command', label: '명령어 (고정)', type: 'textarea', required: false },
+    {
+      key: 'provider',
+      label: '프로바이더',
+      type: 'select',
+      default: 'auto',
+      options: [
+        { label: '자동 (Bedrock 우선)', value: 'auto' },
+        { label: 'AWS Bedrock', value: 'bedrock' },
+        { label: '로컬 (Ollama/LM Studio)', value: 'local' },
+      ],
+    },
     {
       key: 'style',
       label: '프롬프트 스타일',

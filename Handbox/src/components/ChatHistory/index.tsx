@@ -99,7 +99,7 @@ function ChatHistory({ onSelectSession, onNewChat }: ChatHistoryProps) {
     onSelectSession?.(newId)
   }
 
-  const { setNodes, setEdges } = useWorkflowStore()
+  const { setNodes, setEdges, triggerFitView } = useWorkflowStore()
 
   const handleSelectSession = async (sessionId: string) => {
     loadSession(sessionId)
@@ -127,6 +127,7 @@ function ChatHistory({ onSelectSession, onNewChat }: ChatHistoryProps) {
             targetHandle: e.target_handle,
           })))
         }
+        triggerFitView()
         console.log('[ChatHistory] 워크플로우 로드 완료:', session.linkedWorkflowName)
       } catch (error) {
         console.error('[ChatHistory] 워크플로우 로드 실패:', error)
@@ -242,7 +243,7 @@ function ChatHistory({ onSelectSession, onNewChat }: ChatHistoryProps) {
               </Box>
             }
             secondary={
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
+              <Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5 }}>
                 <Typography variant="caption" color="grey.600" sx={{ fontSize: '0.7rem' }}>
                   {formatSessionTime(session.updatedAt)}
                 </Typography>
@@ -263,6 +264,7 @@ function ChatHistory({ onSelectSession, onNewChat }: ChatHistoryProps) {
                 )}
               </Box>
             }
+            secondaryTypographyProps={{ component: 'div' }}
           />
         </ListItemButton>
       </ListItem>
@@ -328,7 +330,7 @@ function ChatHistory({ onSelectSession, onNewChat }: ChatHistoryProps) {
       </Box>
 
       {/* 대화 목록 */}
-      <Box sx={{ flex: 1, overflow: 'auto', p: 1 }}>
+      <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', p: 1 }}>
         {filteredSessions.length === 0 ? (
           <Box sx={{ textAlign: 'center', py: 4 }}>
             <ChatIcon sx={{ fontSize: 40, color: 'grey.700', mb: 1 }} />

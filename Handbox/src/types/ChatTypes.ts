@@ -5,6 +5,50 @@
 import type { WorkflowFile } from './WorkflowFile'
 
 // ============================================================
+// 파일 첨부
+// ============================================================
+
+export interface FileAttachment {
+  /** 첨부 파일 고유 ID */
+  id: string
+  /** 파일명 */
+  name: string
+  /** 파일 유형 */
+  type: 'workflow-json' | 'document' | 'image' | 'other'
+  /** 파일 크기 (bytes) */
+  size: number
+  /** 파일 내용 (JSON/텍스트) */
+  content?: string
+  /** 로컬 파일 경로 (Tauri) */
+  path?: string
+  /** 업로드 상태 */
+  status: 'uploading' | 'ready' | 'error'
+  /** 오류 메시지 */
+  errorMessage?: string
+}
+
+// ============================================================
+// 워크플로우 분석 컨텍스트
+// ============================================================
+
+export interface WorkflowAnalysisContext {
+  /** 워크플로우 ID */
+  workflowId: string
+  /** 워크플로우 이름 */
+  workflowName: string
+  /** 노드 수 */
+  nodeCount: number
+  /** 엣지 수 */
+  edgeCount: number
+  /** 사용된 노드 타입 목록 */
+  nodeTypes: string[]
+  /** 감지된 문제점 */
+  issues: string[]
+  /** 개선 제안 */
+  suggestions: string[]
+}
+
+// ============================================================
 // 채팅 메시지
 // ============================================================
 
@@ -23,6 +67,21 @@ export interface ChatMessage {
   isGenerating?: boolean
   /** 오류 메시지 */
   error?: string
+  /** 첨부 파일 목록 */
+  attachments?: FileAttachment[]
+  /** 워크플로우 분석 컨텍스트 (첨부된 JSON 분석 시) */
+  analysisContext?: WorkflowAnalysisContext
+  /** XAI 메타데이터 (Agent 시스템 통합) */
+  metadata?: {
+    xaiAvailable?: boolean
+    promptAnalysis?: {
+      intent: string
+      complexity: string
+      entities: string[]
+    }
+    memoryContextUsed?: number
+    [key: string]: any
+  }
 }
 
 // ============================================================
@@ -70,6 +129,8 @@ export interface WorkflowGenerationResult {
   _meta?: {
     userRequest: string
     conversationTurns: number
+    promptAnalysis?: any
+    attachedWorkflow?: WorkflowFile
   }
 }
 

@@ -22,7 +22,7 @@ interface ChatMessageProps {
 
 function ChatMessage({ message }: ChatMessageProps) {
   const isUser = message.role === 'user'
-  const { setNodes, setEdges } = useWorkflowStore()
+  const { setNodes, setEdges, triggerFitView } = useWorkflowStore()
   const { closeChat } = useChatStore()
 
   // 워크플로우 재생성 (과거 대화에서 생성된 워크플로우 적용)
@@ -35,13 +35,14 @@ function ChatMessage({ message }: ChatMessageProps) {
 
       setNodes(layoutedNodes)
       setEdges(edges)
+      triggerFitView()
       closeChat()
 
       console.log('[ChatMessage] 워크플로우 재적용:', layoutedNodes.length, '개 노드')
     } catch (error) {
       console.error('[ChatMessage] 워크플로우 적용 실패:', error)
     }
-  }, [message.workflowPreview, setNodes, setEdges, closeChat])
+  }, [message.workflowPreview, setNodes, setEdges, triggerFitView, closeChat])
 
   return (
     <Box

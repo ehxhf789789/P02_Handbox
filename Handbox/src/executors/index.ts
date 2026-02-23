@@ -48,6 +48,10 @@ import { ConditionalDefinition } from './control/ConditionalExecutor'
 import { CliDefinition } from './control/CliExecutor'
 import { ScriptDefinition } from './control/ScriptExecutor'
 import { SubWorkflowDefinition } from './control/SubWorkflowExecutor'
+import { VotingAggregatorDefinition } from './control/VotingAggregatorExecutor'
+
+// === Agent ===
+import { PersonaAgentDefinition } from './agent/PersonaAgentExecutor'
 
 // === API ===
 import { HttpRequestDefinition } from './api/HttpRequestExecutor'
@@ -60,6 +64,10 @@ import { ResultViewerDefinition, JsonViewerDefinition } from './viz/ResultViewer
 import { ChartViewerDefinition } from './viz/ChartViewerExecutor'
 import { TableViewerDefinition } from './viz/TableViewerExecutor'
 import { StatsViewerDefinition } from './viz/StatsViewerExecutor'
+
+// === Vision (NEW) ===
+import { VisionAnalyzeDefinition } from './vision/VisionAnalyzeExecutor'
+import { ImageGenerateDefinition } from './vision/ImageGenerateExecutor'
 
 // === Extension Stubs (NEW) ===
 import { AzureCLIDefinition, GCPCLIDefinition, CustomCLIDefinition } from './extension/CLIExtensionExecutor'
@@ -108,6 +116,10 @@ export const BUILTIN_DEFINITIONS: NodeDefinition[] = [
   CliDefinition,
   ScriptDefinition,
   SubWorkflowDefinition,
+  VotingAggregatorDefinition,
+
+  // Agent
+  PersonaAgentDefinition,
 
   // API
   HttpRequestDefinition,
@@ -121,6 +133,10 @@ export const BUILTIN_DEFINITIONS: NodeDefinition[] = [
   ChartViewerDefinition,
   TableViewerDefinition,
   StatsViewerDefinition,
+
+  // Vision (NEW)
+  VisionAnalyzeDefinition,
+  ImageGenerateDefinition,
 
   // Extension Stubs (NEW - disabled by default)
   AzureCLIDefinition,
@@ -178,6 +194,14 @@ export const LEGACY_TYPE_MAP: Record<string, string> = {
   'merge': 'control.merge',
   'conditional': 'control.conditional',
   'sub-workflow': 'control.sub-workflow',
+  'voting-aggregator': 'control.voting-aggregator',
+  'vote': 'control.voting-aggregator',
+  'consensus': 'control.voting-aggregator',
+
+  // Agent
+  'persona-agent': 'agent.persona',
+  'expert-agent': 'agent.persona',
+  'evaluator': 'agent.persona',
 
   // Export
   'export-excel': 'export.excel',
@@ -192,6 +216,116 @@ export const LEGACY_TYPE_MAP: Record<string, string> = {
   'viz-chart': 'viz.chart',
   'viz-table': 'viz.table',
   'viz-stats': 'viz.stats',
+
+  // Vision
+  'vision-analyze': 'vision.analyze',
+  'image-analyze': 'vision.analyze',
+  'ocr': 'vision.analyze',
+  'image-generate': 'vision.generate',
+  'image-gen': 'vision.generate',
+
+  // Output (워크플로우 끝단)
+  'output': 'viz.result-viewer',
+  'result': 'viz.result-viewer',
+  'display': 'viz.result-viewer',
+
+  // Vector DB / RAG 검색 (미등록 타입들 → rag.retriever로 통일)
+  'vector-opensearch': 'rag.retriever',
+  'vector-search': 'rag.retriever',
+  'vector-query': 'rag.retriever',
+  'kb-query': 'rag.retriever',
+  'kb-search': 'rag.retriever',
+  'vector-pinecone': 'rag.retriever',
+  'vector-chroma': 'rag.retriever',
+  'vector-faiss': 'rag.retriever',
+
+  // Vector DB 인제스트 → ai.embedding으로 매핑
+  'kb-ingest': 'ai.embedding',
+  'vector-ingest': 'ai.embedding',
+
+  // 추가 LLM 모델 타입들
+  'model-titan-text-premier': 'ai.llm-invoke',
+  'model-llama-3-1-405b': 'ai.llm-invoke',
+  'model-llama-3-1-70b': 'ai.llm-invoke',
+  'model-mistral-large': 'ai.llm-invoke',
+  'llm': 'ai.llm-invoke',
+  'chat': 'ai.llm-invoke',
+
+  // MCP 도구 → 적절한 executor로 매핑
+  'text_transform': 'data.preprocess',
+  'json_process': 'data.preprocess',
+  'data_transform': 'data.preprocess',
+  'math_calculate': 'viz.stats',
+  'chart_generate': 'viz.chart',
+  'http_request': 'api.http-request',
+  'regex': 'data.preprocess',
+  'datetime': 'data.preprocess',
+  'crypto_utils': 'data.preprocess',
+
+  // MCP RAG 도구
+  'rag_ingest': 'ai.embedding',
+  'rag_query': 'rag.retriever',
+  'rag_generate': 'ai.llm-invoke',
+
+  // MCP S3 도구 → storage 매핑
+  's3_upload': 'storage.cloud',
+  's3_download': 'storage.cloud',
+  's3_list': 'storage.cloud',
+  // LLM이 생성하는 S3 dotted 패턴
+  's3.upload': 'storage.cloud',
+  's3.download': 'storage.cloud',
+  's3.list': 'storage.cloud',
+  's3.list-buckets': 'storage.cloud',
+  's3.get-object': 'storage.cloud',
+  's3.put-object': 'storage.cloud',
+  'storage.s3': 'storage.cloud',
+  'storage.s3-upload': 'storage.cloud',
+  'storage.s3-download': 'storage.cloud',
+  // data.s3_xxx 패턴 (LLM이 자주 생성)
+  'data.s3_list': 'storage.cloud',
+  'data.s3_download': 'storage.cloud',
+  'data.s3_upload': 'storage.cloud',
+  'data.s3-list': 'storage.cloud',
+  'data.s3-download': 'storage.cloud',
+  'data.s3-upload': 'storage.cloud',
+
+  // MCP KB 도구
+  'kb_create': 'rag.context-builder',
+  'kb_list': 'rag.retriever',
+  'data.kb_create': 'rag.context-builder',  // LLM이 생성할 수 있는 패턴
+  'data.kb-create': 'rag.context-builder',
+  'kb-create': 'rag.context-builder',
+  'kb.create': 'rag.context-builder',
+  'vector_store': 'storage.local',
+  'vector-store': 'storage.local',
+  'data.vector_store': 'storage.local',
+
+  // MCP 에이전트
+  'agent_invoke': 'agent.persona',
+
+  // LLM이 자주 생성하는 잘못된 노드 타입들 (dotted variants)
+  'data.data_transform': 'data.preprocess',
+  'data.data-transform': 'data.preprocess',
+  'data.transform': 'data.preprocess',
+  'data.analysis': 'viz.stats',
+  'data.trend_analysis': 'viz.stats',
+  'data.anomaly_detection': 'viz.stats',
+  'data.prediction': 'ai.llm-invoke',
+  'data.seasonality': 'viz.stats',
+
+  // 분석 관련
+  'analysis.trend': 'viz.stats',
+  'analysis.product': 'viz.stats',
+  'analysis.regional': 'viz.stats',
+  'analysis.anomaly': 'viz.stats',
+  'analysis.prediction': 'ai.llm-invoke',
+  'analysis.seasonality': 'viz.stats',
+
+  // 비전 관련 잘못된 패턴
+  'vision.image-analyze': 'vision.analyze',
+  'vision.ocr': 'vision.analyze',
+  'image.analyze': 'vision.analyze',
+  'image.ocr': 'vision.analyze',
 }
 
 // ============================================================
@@ -264,6 +398,9 @@ export {
   CliDefinition,
   ScriptDefinition,
   SubWorkflowDefinition,
+  VotingAggregatorDefinition,
+  // Agent
+  PersonaAgentDefinition,
   // API
   HttpRequestDefinition,
   // Export
@@ -274,6 +411,9 @@ export {
   ChartViewerDefinition,
   TableViewerDefinition,
   StatsViewerDefinition,
+  // Vision
+  VisionAnalyzeDefinition,
+  ImageGenerateDefinition,
   // Extensions
   AzureCLIDefinition,
   GCPCLIDefinition,

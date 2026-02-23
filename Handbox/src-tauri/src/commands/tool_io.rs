@@ -595,6 +595,193 @@ pub async fn tool_file_info(path: String) -> Result<Value, String> {
 }
 
 // ─────────────────────────────────────────────
+// 이미지 처리 도구
+// ─────────────────────────────────────────────
+
+/// 이미지 파일을 Base64로 읽기 (Vision AI용)
+#[tauri::command]
+pub async fn tool_read_image_base64(path: String) -> Result<String, String> {
+    let file_path = Path::new(&path);
+
+    if !file_path.exists() {
+        return Err(format!("이미지 파일이 존재하지 않습니다: {}", path));
+    }
+
+    // 이미지 파일 확장자 확인
+    let ext = file_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    let valid_extensions = ["jpg", "jpeg", "png", "gif", "webp", "bmp", "tiff", "tif"];
+    if !valid_extensions.contains(&ext.as_str()) {
+        return Err(format!(
+            "지원하지 않는 이미지 형식입니다: {}. 지원: {:?}",
+            ext, valid_extensions
+        ));
+    }
+
+    // 파일 읽기
+    let bytes = fs::read(file_path).map_err(|e| format!("이미지 읽기 실패: {}", e))?;
+
+    // Base64 인코딩
+    let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+
+    Ok(encoded)
+}
+
+/// URL에서 이미지를 가져와 Base64로 변환 (Vision AI용)
+#[tauri::command]
+pub async fn tool_fetch_image_base64(url: String) -> Result<String, String> {
+    // URL 검증
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err("유효한 HTTP/HTTPS URL이 필요합니다".to_string());
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("HTTP 클라이언트 생성 실패: {}", e))?;
+
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("이미지 다운로드 실패: {}", e))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("이미지 다운로드 실패 (HTTP {})", status));
+    }
+
+    // Content-Type 확인
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    if !content_type.starts_with("image/") {
+        return Err(format!(
+            "URL이 이미지가 아닙니다. Content-Type: {}",
+            content_type
+        ));
+    }
+
+    // 바이트로 읽기
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| format!("이미지 바이트 읽기 실패: {}", e))?;
+
+    // Base64 인코딩
+    let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+
+    Ok(encoded)
+}
+
+/// 이미지 파일 정보 조회 (크기, 포맷, 해상도)
+#[tauri::command]
+pub async fn tool_image_info(path: String) -> Result<Value, String> {
+    let file_path = Path::new(&path);
+
+    if !file_path.exists() {
+        return Err(format!("이미지 파일이 존재하지 않습니다: {}", path));
+    }
+
+    let bytes = fs::read(file_path).map_err(|e| format!("이미지 읽기 실패: {}", e))?;
+    let file_size = bytes.len() as u64;
+
+    // 이미지 포맷 및 크기 감지
+    let (format, width, height) = detect_image_dimensions(&bytes);
+
+    Ok(json!({
+        "path": path,
+        "format": format,
+        "width": width,
+        "height": height,
+        "size": file_size,
+        "size_human": format_size(file_size),
+        "mime_type": format_to_mime(&format),
+    }))
+}
+
+/// 이미지 차원 감지 (헤더 파싱)
+fn detect_image_dimensions(bytes: &[u8]) -> (String, u32, u32) {
+    // PNG: 시그니처 + IHDR 청크에서 크기 추출
+    if bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) && bytes.len() >= 24 {
+        let width = u32::from_be_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
+        let height = u32::from_be_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]);
+        return ("png".to_string(), width, height);
+    }
+
+    // JPEG: SOI 마커 확인 후 SOF 마커에서 크기 추출
+    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        // 간단한 SOF0/SOF2 탐색
+        let mut i = 2;
+        while i + 8 < bytes.len() {
+            if bytes[i] == 0xFF {
+                let marker = bytes[i + 1];
+                // SOF0 (0xC0) 또는 SOF2 (0xC2)
+                if marker == 0xC0 || marker == 0xC2 {
+                    let height = u16::from_be_bytes([bytes[i + 5], bytes[i + 6]]) as u32;
+                    let width = u16::from_be_bytes([bytes[i + 7], bytes[i + 8]]) as u32;
+                    return ("jpeg".to_string(), width, height);
+                }
+                // 다음 세그먼트로 이동
+                if i + 3 < bytes.len() {
+                    let segment_len = u16::from_be_bytes([bytes[i + 2], bytes[i + 3]]) as usize;
+                    i += 2 + segment_len;
+                } else {
+                    break;
+                }
+            } else {
+                i += 1;
+            }
+        }
+        return ("jpeg".to_string(), 0, 0);
+    }
+
+    // GIF: 헤더에서 크기 추출
+    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        if bytes.len() >= 10 {
+            let width = u16::from_le_bytes([bytes[6], bytes[7]]) as u32;
+            let height = u16::from_le_bytes([bytes[8], bytes[9]]) as u32;
+            return ("gif".to_string(), width, height);
+        }
+    }
+
+    // WebP: RIFF + WEBP 시그니처
+    if bytes.starts_with(b"RIFF") && bytes.len() >= 12 && &bytes[8..12] == b"WEBP" {
+        // VP8/VP8L 청크에서 크기 추출 (간략화)
+        return ("webp".to_string(), 0, 0);
+    }
+
+    // BMP: 헤더에서 크기 추출
+    if bytes.starts_with(&[0x42, 0x4D]) && bytes.len() >= 26 {
+        let width = i32::from_le_bytes([bytes[18], bytes[19], bytes[20], bytes[21]]) as u32;
+        let height = i32::from_le_bytes([bytes[22], bytes[23], bytes[24], bytes[25]]).unsigned_abs();
+        return ("bmp".to_string(), width, height);
+    }
+
+    ("unknown".to_string(), 0, 0)
+}
+
+/// 포맷을 MIME 타입으로 변환
+fn format_to_mime(format: &str) -> &'static str {
+    match format {
+        "png" => "image/png",
+        "jpeg" | "jpg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "tiff" | "tif" => "image/tiff",
+        _ => "application/octet-stream",
+    }
+}
+
+// ─────────────────────────────────────────────
 // http.request — HTTP 요청
 // ─────────────────────────────────────────────
 #[tauri::command]

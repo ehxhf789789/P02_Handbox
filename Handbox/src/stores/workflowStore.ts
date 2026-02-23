@@ -104,9 +104,13 @@ export interface WorkflowState {
   // 중단점(Breakpoint) 관리
   breakpointNodeId: string | null  // 실행 중단할 노드 ID
 
+  // 뷰포트 제어
+  fitViewTrigger: number  // 증가할 때마다 fitView 호출
+
   // Actions
   setNodes: (nodes: Node[]) => void
   setEdges: (edges: Edge[]) => void
+  triggerFitView: () => void  // fitView 트리거
   onNodesChange: (changes: NodeChange[]) => void
   onEdgesChange: (changes: EdgeChange[]) => void
   onConnect: (connection: Connection) => void
@@ -151,9 +155,11 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   nodeExecutionResults: {},
   isWorkflowRunning: false,
   breakpointNodeId: null,
+  fitViewTrigger: 0,
 
   setNodes: (nodes) => set({ nodes }),
   setEdges: (edges) => set({ edges }),
+  triggerFitView: () => set((state) => ({ fitViewTrigger: state.fitViewTrigger + 1 })),
 
   onNodesChange: (changes) => {
     set({

@@ -1,4 +1,4 @@
-import { useState, memo, useCallback } from 'react'
+import { useState, memo, useCallback, useRef, useEffect } from 'react'
 import {
   Dialog,
   DialogTitle,
@@ -21,6 +21,7 @@ import {
   Divider,
   Chip,
   CircularProgress,
+  Snackbar,
 } from '@mui/material'
 import {
   Visibility,
@@ -29,10 +30,14 @@ import {
   CloudDone,
   CloudOff,
   Link as LinkIcon,
+  FileDownload,
+  FileUpload,
+  School,
 } from '@mui/icons-material'
 import { useAppStore, AIProvider } from '../../stores/appStore'
 import { invoke } from '@tauri-apps/api/tauri'
 import { saveCredentials, clearSavedCredentials } from '../ProviderSetup'
+import { exportWorkflowLearningData, importWorkflowLearningData, type LearningData } from '../../services/IntegratedWorkflowAgent'
 
 // AWS 리전 목록
 const AWS_REGIONS = [
@@ -139,6 +144,68 @@ function AISettingsDialogContent({ open, onClose }: AISettingsDialogProps) {
   const [awsRegion, setAwsRegion] = useState('ap-northeast-2')
   const [awsLoading, setAwsLoading] = useState(false)
   const [awsError, setAwsError] = useState('')
+
+  // 학습 데이터 내보내기/가져오기 상태
+  const [learningStats, setLearningStats] = useState<{ feedbacks: number; patterns: number } | null>(null)
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' | 'info' }>({ open: false, message: '', severity: 'info' })
+  const learningImportRef = useRef<HTMLInputElement>(null)
+
+  // 학습 데이터 내보내기
+  const handleExportLearning = async () => {
+    try {
+      const data = await exportWorkflowLearningData()
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `handbox-learning-${new Date().toISOString().split('T')[0]}.json`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      setSnackbar({ open: true, message: `학습 데이터 내보내기 완료 (${data.feedbacks.length}개 피드백, ${data.patterns.length}개 패턴)`, severity: 'success' })
+    } catch (error) {
+      setSnackbar({ open: true, message: `내보내기 실패: ${error}`, severity: 'error' })
+    }
+  }
+
+  // 학습 데이터 가져오기
+  const handleImportLearning = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    try {
+      const content = await file.text()
+      const data: LearningData = JSON.parse(content)
+
+      // 유효성 검사
+      if (!data.version || !data.patterns || !Array.isArray(data.patterns)) {
+        throw new Error('유효하지 않은 학습 데이터 형식입니다.')
+      }
+
+      const result = await importWorkflowLearningData(data)
+      setSnackbar({ open: true, message: `학습 데이터 가져오기 완료 (${result.imported}개 적용, ${result.skipped}개 스킵)`, severity: 'success' })
+    } catch (error) {
+      setSnackbar({ open: true, message: `가져오기 실패: ${error}`, severity: 'error' })
+    }
+
+    e.target.value = ''
+  }
+
+  // 학습 통계 로드
+  const loadLearningStats = useCallback(async () => {
+    try {
+      const data = await exportWorkflowLearningData()
+      setLearningStats({ feedbacks: data.feedbacks.length, patterns: data.patterns.length })
+    } catch {
+      setLearningStats({ feedbacks: 0, patterns: 0 })
+    }
+  }, [])
+
+  // 다이얼로그 열릴 때 통계 로드
+  useEffect(() => {
+    if (open) loadLearningStats()
+  }, [open, loadLearningStats])
 
   const handleProviderChange = useCallback((provider: AIProvider) => {
     setAIModelConfig({ provider })
@@ -617,7 +684,7 @@ function AISettingsDialogContent({ open, onClose }: AISettingsDialogProps) {
 
         {/* 공통 설정 */}
         <Typography variant="subtitle2" sx={{ mb: 2, color: 'grey.300' }}>
-          공통 설정
+          모델 파라미터
         </Typography>
 
         <Box sx={{ px: 1 }}>
@@ -650,7 +717,74 @@ function AISettingsDialogContent({ open, onClose }: AISettingsDialogProps) {
             }}
           />
         </Box>
+
+        <Divider sx={{ my: 2, borderColor: 'rgba(255,255,255,0.1)' }} />
+
+        {/* 학습 데이터 관리 */}
+        <Typography variant="subtitle2" sx={{ mb: 2, color: 'grey.300', display: 'flex', alignItems: 'center', gap: 1 }}>
+          <School sx={{ fontSize: 18, color: '#a78bfa' }} />
+          사용자 학습 데이터
+        </Typography>
+
+        <Alert severity="info" sx={{ mb: 2, bgcolor: 'rgba(167, 139, 250, 0.1)', border: '1px solid rgba(167, 139, 250, 0.3)' }}>
+          워크플로우에 피드백을 남기면 AI가 선호하는 패턴을 학습합니다. 학습 데이터를 내보내서 다른 환경에서 재사용할 수 있습니다.
+        </Alert>
+
+        {learningStats && (
+          <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+            <Chip label={`${learningStats.feedbacks}개 피드백`} size="small" sx={{ bgcolor: 'rgba(167, 139, 250, 0.2)', color: '#a78bfa' }} />
+            <Chip label={`${learningStats.patterns}개 학습된 패턴`} size="small" sx={{ bgcolor: 'rgba(16, 185, 129, 0.2)', color: '#10b981' }} />
+          </Box>
+        )}
+
+        <Box sx={{ display: 'flex', gap: 2 }}>
+          <Button
+            variant="outlined"
+            startIcon={<FileDownload />}
+            onClick={handleExportLearning}
+            sx={{
+              flex: 1,
+              color: '#a78bfa',
+              borderColor: 'rgba(167, 139, 250, 0.3)',
+              '&:hover': { borderColor: '#a78bfa', bgcolor: 'rgba(167, 139, 250, 0.1)' },
+            }}
+          >
+            학습 데이터 내보내기
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={<FileUpload />}
+            onClick={() => learningImportRef.current?.click()}
+            sx={{
+              flex: 1,
+              color: '#10b981',
+              borderColor: 'rgba(16, 185, 129, 0.3)',
+              '&:hover': { borderColor: '#10b981', bgcolor: 'rgba(16, 185, 129, 0.1)' },
+            }}
+          >
+            학습 데이터 가져오기
+          </Button>
+          <input
+            type="file"
+            ref={learningImportRef}
+            onChange={handleImportLearning}
+            accept=".json"
+            style={{ display: 'none' }}
+          />
+        </Box>
       </DialogContent>
+
+      {/* Snackbar for learning data operations */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert onClose={() => setSnackbar({ ...snackbar, open: false })} severity={snackbar.severity} sx={{ width: '100%' }}>
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
 
       <DialogActions sx={{ p: 2 }}>
         <Button onClick={onClose} sx={{ color: 'grey.400' }}>

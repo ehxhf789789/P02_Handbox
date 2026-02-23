@@ -247,11 +247,23 @@ const formatOutput = (output: string | Record<string, any> | undefined): string 
 }
 
 function GenericNode({ data, selected, type, id }: NodeProps<GenericNodeData>) {
+  // 디버깅: 노드 데이터 확인
+  console.log(`[GenericNode] 렌더링: id=${id}, type=${type}, label=${data?.label}, color=${data?.color}`)
+
+  // 데이터가 없으면 기본값 사용
+  const safeData = {
+    label: data?.label || type || 'Unknown',
+    color: data?.color || '#64748b',
+    description: data?.description || '',
+    config: data?.config || {},
+    enabled: data?.enabled ?? true,
+  }
+
   const category = getNodeCategory(type || '')
   const icon = getNodeIcon(type || '')
-  const configSummary = getConfigSummary(data.config, type || '')
-  const hasConfig = data.config && Object.keys(data.config).length > 0
-  const isDisabled = data.enabled === false
+  const configSummary = getConfigSummary(safeData.config, type || '')
+  const hasConfig = safeData.config && Object.keys(safeData.config).length > 0
+  const isDisabled = safeData.enabled === false
 
   // 실행 상태 가져오기 (executionStore에서 가져옴)
   const executionResult = useExecutionStore((state) => state.nodeExecutionResults[id])
@@ -280,7 +292,7 @@ function GenericNode({ data, selected, type, id }: NodeProps<GenericNodeData>) {
       case 'running': return '0 0 20px rgba(251, 191, 36, 0.5)'
       case 'completed': return '0 0 15px rgba(34, 197, 94, 0.3)'
       case 'error': return '0 0 15px rgba(239, 68, 68, 0.3)'
-      default: return selected ? `0 0 20px ${data.color}40` : 'none'
+      default: return selected ? `0 0 20px ${safeData.color}40` : 'none'
     }
   }
 
@@ -300,7 +312,7 @@ function GenericNode({ data, selected, type, id }: NodeProps<GenericNodeData>) {
                 : isBreakpoint
                   ? '2px dashed #f97316'
                   : selected
-                    ? `2px solid ${data.color}`
+                    ? `2px solid ${safeData.color}`
                     : isDisabled
                       ? '2px dashed rgba(107, 114, 128, 0.5)'
                       : '1px solid rgba(255,255,255,0.1)',
@@ -318,7 +330,7 @@ function GenericNode({ data, selected, type, id }: NodeProps<GenericNodeData>) {
         },
         // React Flow 기본 스타일 오버라이드
         '& .react-flow__handle': {
-          background: isDisabled ? '#6b7280' : data.color,
+          background: isDisabled ? '#6b7280' : safeData.color,
         },
       }}
     >
@@ -327,7 +339,7 @@ function GenericNode({ data, selected, type, id }: NodeProps<GenericNodeData>) {
         type="target"
         position={Position.Left}
         style={{
-          background: isCompatibleInput ? '#22c55e' : data.color,
+          background: isCompatibleInput ? '#22c55e' : safeData.color,
           width: isCompatibleInput ? 14 : 10,
           height: isCompatibleInput ? 14 : 10,
           border: isCompatibleInput ? '3px solid #fff' : '2px solid #0f172a',
@@ -424,7 +436,7 @@ function GenericNode({ data, selected, type, id }: NodeProps<GenericNodeData>) {
       {/* Header */}
       <Box
         sx={{
-          background: isDisabled ? 'rgba(107, 114, 128, 0.3)' : `${data.color}30`,
+          background: isDisabled ? 'rgba(107, 114, 128, 0.3)' : `${safeData.color}30`,
           p: 1.5,
           borderTopLeftRadius: 8,
           borderTopRightRadius: 8,
@@ -433,13 +445,13 @@ function GenericNode({ data, selected, type, id }: NodeProps<GenericNodeData>) {
           gap: 1,
         }}
       >
-        <Box sx={{ color: isDisabled ? '#6b7280' : data.color }}>{icon}</Box>
+        <Box sx={{ color: isDisabled ? '#6b7280' : safeData.color }}>{icon}</Box>
         <Typography variant="body2" fontWeight="bold" color={isDisabled ? 'grey.500' : 'white'} sx={{ flex: 1, fontSize: '0.85rem' }}>
-          {data.label}
+          {safeData.label}
         </Typography>
         {hasConfig && !isDisabled && (
           <Tooltip title="설정됨">
-            <CheckCircleOutlineIcon sx={{ color: data.color, fontSize: 14, opacity: 0.8 }} />
+            <CheckCircleOutlineIcon sx={{ color: safeData.color, fontSize: 14, opacity: 0.8 }} />
           </Tooltip>
         )}
       </Box>
@@ -454,8 +466,8 @@ function GenericNode({ data, selected, type, id }: NodeProps<GenericNodeData>) {
             sx={{
               fontSize: '0.6rem',
               height: 18,
-              background: `${data.color}20`,
-              color: data.color,
+              background: `${safeData.color}20`,
+              color: safeData.color,
             }}
           />
 
@@ -475,9 +487,9 @@ function GenericNode({ data, selected, type, id }: NodeProps<GenericNodeData>) {
         </Box>
 
         {/* Description */}
-        {data.description && (
+        {safeData.description && (
           <Typography variant="caption" color="grey.500" sx={{ display: 'block', mt: 0.5, fontSize: '0.7rem' }}>
-            {data.description}
+            {safeData.description}
           </Typography>
         )}
 
@@ -597,7 +609,7 @@ function GenericNode({ data, selected, type, id }: NodeProps<GenericNodeData>) {
         type="source"
         position={Position.Right}
         style={{
-          background: isCompatibleOutput ? '#22c55e' : data.color,
+          background: isCompatibleOutput ? '#22c55e' : safeData.color,
           width: isCompatibleOutput ? 14 : 10,
           height: isCompatibleOutput ? 14 : 10,
           border: isCompatibleOutput ? '3px solid #fff' : '2px solid #0f172a',

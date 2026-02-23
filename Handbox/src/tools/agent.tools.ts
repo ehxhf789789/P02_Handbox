@@ -201,9 +201,9 @@ export const AgentToolUseDefinition: NodeDefinition = {
       // 자동 실행
       if (config.auto_execute && tool_calls.length > 0) {
         for (const call of tool_calls.slice(0, config.max_tool_calls)) {
-          // Handbox 노드 매핑 시도
-          const nodeType = NodeRegistry.findByName(call.name)
-          if (nodeType) {
+          // Handbox 노드 매핑 시도 (tool name을 node type으로 매핑)
+          const nodeDefinition = NodeRegistry.get(call.name)
+          if (nodeDefinition) {
             // 노드 실행 시뮬레이션
             tool_results.push({
               tool: call.name,

@@ -76,6 +76,64 @@ pub struct KnowledgeBaseQuery {
     pub filter: Option<serde_json::Value>,
 }
 
+// ============================================================
+// Vision & Image Generation Types
+// ============================================================
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VisionAnalyzeRequest {
+    pub image_path: Option<String>,
+    pub image_base64: Option<String>,
+    pub analysis_type: Option<String>,  // general, ocr, document, chart, table
+    pub prompt: Option<String>,
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VisionAnalyzeResponse {
+    pub analysis: String,
+    pub extracted_text: Option<String>,
+    pub objects: Option<Vec<DetectedObject>>,
+    pub tables: Option<Vec<ExtractedTable>>,
+    pub confidence: f32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DetectedObject {
+    pub label: String,
+    pub confidence: f32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ExtractedTable {
+    pub rows: Vec<Vec<String>>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ImageGenerateRequest {
+    pub prompt: String,
+    pub negative_prompt: Option<String>,
+    pub model: Option<String>,  // titan-image-g1, stability-sdxl
+    pub width: Option<i32>,
+    pub height: Option<i32>,
+    pub style: Option<String>,  // photorealistic, cinematic, digital-art, anime
+    pub output_path: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ImageGenerateResponse {
+    pub image_base64: String,
+    pub image_path: Option<String>,
+    pub model: String,
+    pub dimensions: ImageDimensions,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ImageDimensions {
+    pub width: i32,
+    pub height: i32,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct KnowledgeBaseResult {
     pub results: Vec<SearchResult>,
@@ -537,4 +595,256 @@ pub async fn upload_to_s3(
         .map_err(|e| format!("S3 upload failed: {}", e))?;
 
     Ok(format!("s3://{}/{}", bucket, key))
+}
+
+// ============================================================
+// Vision Analyze (Claude Vision)
+// ============================================================
+
+/// 이미지 분석 (Claude Vision via Bedrock)
+#[tauri::command]
+pub async fn vision_analyze(request: VisionAnalyzeRequest) -> Result<VisionAnalyzeResponse, String> {
+    // 이미지 데이터 로드
+    let image_base64 = if let Some(base64) = request.image_base64 {
+        base64
+    } else if let Some(path) = request.image_path {
+        // 파일에서 읽어서 base64 인코딩
+        let image_bytes = std::fs::read(&path)
+            .map_err(|e| format!("이미지 파일 읽기 실패: {}", e))?;
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &image_bytes)
+    } else {
+        return Err("이미지 경로 또는 Base64 데이터가 필요합니다.".to_string());
+    };
+
+    // 이미지 MIME 타입 추측
+    let media_type = guess_image_media_type(&image_base64);
+
+    // 분석 프롬프트 구성
+    let analysis_type = request.analysis_type.unwrap_or_else(|| "general".to_string());
+    let user_prompt = request.prompt.unwrap_or_default();
+
+    let analysis_prompt = match analysis_type.as_str() {
+        "ocr" => format!(
+            "이 이미지에서 모든 텍스트를 추출하세요. 레이아웃을 유지하며 정확하게 텍스트를 인식해주세요.{}",
+            if user_prompt.is_empty() { String::new() } else { format!("\n\n추가 지시: {}", user_prompt) }
+        ),
+        "document" => format!(
+            "이 문서 이미지를 분석하세요. 문서 유형, 주요 내용, 구조를 파악하고 요약해주세요.{}",
+            if user_prompt.is_empty() { String::new() } else { format!("\n\n추가 지시: {}", user_prompt) }
+        ),
+        "chart" => format!(
+            "이 차트/그래프 이미지를 분석하세요. 차트 유형, 데이터 트렌드, 주요 수치를 설명해주세요.{}",
+            if user_prompt.is_empty() { String::new() } else { format!("\n\n추가 지시: {}", user_prompt) }
+        ),
+        "table" => format!(
+            "이 표 이미지에서 데이터를 추출하세요. 행과 열 구조를 파악하고 내용을 텍스트로 변환해주세요.{}",
+            if user_prompt.is_empty() { String::new() } else { format!("\n\n추가 지시: {}", user_prompt) }
+        ),
+        _ => if user_prompt.is_empty() {
+            "이 이미지를 상세히 분석하고 설명해주세요. 주요 요소, 텍스트, 객체 등을 파악해주세요.".to_string()
+        } else {
+            user_prompt
+        },
+    };
+
+    // Claude Vision 모델 선택
+    let model_id = match request.model.as_deref() {
+        Some("claude-3-5-sonnet") => "anthropic.claude-3-5-sonnet-20240620-v1:0",
+        Some("claude-3-haiku") => "anthropic.claude-3-haiku-20240307-v1:0",
+        _ => "anthropic.claude-3-sonnet-20240229-v1:0",
+    };
+
+    // Claude Vision API 호출
+    let config = load_aws_config_with_native_tls().await;
+    let region = config.region()
+        .map(|r| r.to_string())
+        .unwrap_or_else(|| "us-east-1".to_string());
+
+    let client = create_bedrock_client(&region).await;
+
+    let body = serde_json::json!({
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": 4096,
+        "messages": [{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": media_type,
+                        "data": image_base64
+                    }
+                },
+                {
+                    "type": "text",
+                    "text": analysis_prompt
+                }
+            ]
+        }]
+    });
+
+    let response = client
+        .invoke_model()
+        .model_id(model_id)
+        .content_type("application/json")
+        .accept("application/json")
+        .body(aws_sdk_bedrockruntime::primitives::Blob::new(
+            serde_json::to_vec(&body).map_err(|e| e.to_string())?
+        ))
+        .send()
+        .await
+        .map_err(|e| format!("Claude Vision 호출 실패: {}", e))?;
+
+    let response_body: serde_json::Value = serde_json::from_slice(response.body().as_ref())
+        .map_err(|e| format!("응답 파싱 실패: {}", e))?;
+
+    let analysis = response_body["content"][0]["text"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+
+    // OCR 모드에서는 추출된 텍스트도 반환
+    let extracted_text = if analysis_type == "ocr" {
+        Some(analysis.clone())
+    } else {
+        None
+    };
+
+    Ok(VisionAnalyzeResponse {
+        analysis,
+        extracted_text,
+        objects: None,  // Claude는 객체 감지 결과를 별도로 반환하지 않음
+        tables: None,   // 표 추출은 분석 텍스트에 포함
+        confidence: 0.95,  // Claude는 confidence를 반환하지 않음, 기본값 사용
+    })
+}
+
+/// 이미지 MIME 타입 추측
+fn guess_image_media_type(base64_data: &str) -> &'static str {
+    // Base64 데이터의 시작 부분으로 이미지 타입 추측
+    if base64_data.starts_with("/9j/") {
+        "image/jpeg"
+    } else if base64_data.starts_with("iVBOR") {
+        "image/png"
+    } else if base64_data.starts_with("R0lGO") {
+        "image/gif"
+    } else if base64_data.starts_with("UklGR") {
+        "image/webp"
+    } else {
+        "image/png"  // 기본값
+    }
+}
+
+// ============================================================
+// Image Generation (Titan Image Generator)
+// ============================================================
+
+/// 이미지 생성 (Amazon Titan Image Generator via Bedrock)
+#[tauri::command]
+pub async fn generate_image(request: ImageGenerateRequest) -> Result<ImageGenerateResponse, String> {
+    let model = request.model.unwrap_or_else(|| "titan-image-g1".to_string());
+    let width = request.width.unwrap_or(1024);
+    let height = request.height.unwrap_or(1024);
+
+    let config = load_aws_config_with_native_tls().await;
+    let region = config.region()
+        .map(|r| r.to_string())
+        .unwrap_or_else(|| "us-east-1".to_string());
+
+    let client = create_bedrock_client(&region).await;
+
+    // 모델별 요청 형식
+    let (model_id, body) = if model.contains("stability") || model.contains("sdxl") {
+        // Stability AI SDXL
+        (
+            "stability.stable-diffusion-xl-v1",
+            serde_json::json!({
+                "text_prompts": [
+                    { "text": request.prompt, "weight": 1.0 },
+                ],
+                "cfg_scale": 7,
+                "steps": 30,
+                "width": width,
+                "height": height,
+                "seed": 0
+            })
+        )
+    } else {
+        // Amazon Titan Image Generator
+        let style_preset = match request.style.as_deref() {
+            Some("cinematic") => "cinematic",
+            Some("digital-art") => "digital-art",
+            Some("anime") => "anime",
+            _ => "photographic",
+        };
+
+        (
+            "amazon.titan-image-generator-v1",
+            serde_json::json!({
+                "taskType": "TEXT_IMAGE",
+                "textToImageParams": {
+                    "text": request.prompt,
+                    "negativeText": request.negative_prompt.unwrap_or_default()
+                },
+                "imageGenerationConfig": {
+                    "numberOfImages": 1,
+                    "width": width,
+                    "height": height,
+                    "cfgScale": 8.0,
+                    "seed": 0
+                }
+            })
+        )
+    };
+
+    let response = client
+        .invoke_model()
+        .model_id(model_id)
+        .content_type("application/json")
+        .accept("application/json")
+        .body(aws_sdk_bedrockruntime::primitives::Blob::new(
+            serde_json::to_vec(&body).map_err(|e| e.to_string())?
+        ))
+        .send()
+        .await
+        .map_err(|e| format!("이미지 생성 실패: {}", e))?;
+
+    let response_body: serde_json::Value = serde_json::from_slice(response.body().as_ref())
+        .map_err(|e| format!("응답 파싱 실패: {}", e))?;
+
+    // 모델별 응답 파싱
+    let image_base64 = if model.contains("stability") || model.contains("sdxl") {
+        response_body["artifacts"][0]["base64"]
+            .as_str()
+            .ok_or("이미지 데이터 없음")?
+            .to_string()
+    } else {
+        response_body["images"][0]
+            .as_str()
+            .ok_or("이미지 데이터 없음")?
+            .to_string()
+    };
+
+    // 출력 경로가 지정되면 파일로 저장
+    let image_path = if let Some(output_path) = request.output_path {
+        let image_bytes = base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            &image_base64
+        ).map_err(|e| format!("Base64 디코딩 실패: {}", e))?;
+
+        std::fs::write(&output_path, &image_bytes)
+            .map_err(|e| format!("이미지 저장 실패: {}", e))?;
+
+        Some(output_path)
+    } else {
+        None
+    };
+
+    Ok(ImageGenerateResponse {
+        image_base64,
+        image_path,
+        model: model_id.to_string(),
+        dimensions: ImageDimensions { width, height },
+    })
 }

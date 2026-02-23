@@ -11,6 +11,9 @@ import { BedrockLLMProvider } from './llm/BedrockLLMProvider'
 import { OpenAIProvider } from './llm/OpenAIProvider'
 import { AnthropicProvider } from './llm/AnthropicProvider'
 
+// Local LLM Provider (Ollama, LM Studio)
+import { LocalLLMProviderAdapter, LocalEmbeddingProviderAdapter } from './LocalLLMProviderAdapter'
+
 // Embedding Providers
 import { BedrockEmbeddingProvider } from './embedding/BedrockEmbeddingProvider'
 
@@ -22,24 +25,28 @@ import { AWSCloudProvider } from './cloud/AWSCloudProvider'
  * 등록만 수행하고, 실제 연결(connect)은 사용자가 UI에서 수행.
  */
 export function registerBuiltinProviders(): void {
-  // LLM
+  // LLM - 로컬 LLM을 첫 번째로 등록 (기본 프로바이더로 설정됨)
+  ProviderRegistry.registerLLM(LocalLLMProviderAdapter)
   ProviderRegistry.registerLLM(new BedrockLLMProvider())
   ProviderRegistry.registerLLM(new OpenAIProvider())
   ProviderRegistry.registerLLM(new AnthropicProvider())
 
-  // Embedding
+  // Embedding - 로컬 임베딩을 첫 번째로 등록
+  ProviderRegistry.registerEmbedding(LocalEmbeddingProviderAdapter)
   ProviderRegistry.registerEmbedding(new BedrockEmbeddingProvider())
 
   // Cloud
   ProviderRegistry.registerCloud(new AWSCloudProvider())
 
-  console.log('[Providers] 3 LLM + 1 Embedding + 1 Cloud 프로바이더 등록 완료')
+  console.log('[Providers] 4 LLM + 2 Embedding + 1 Cloud 프로바이더 등록 완료')
 }
 
 export {
   BedrockLLMProvider,
   OpenAIProvider,
   AnthropicProvider,
+  LocalLLMProviderAdapter,
+  LocalEmbeddingProviderAdapter,
   BedrockEmbeddingProvider,
   AWSCloudProvider,
 }

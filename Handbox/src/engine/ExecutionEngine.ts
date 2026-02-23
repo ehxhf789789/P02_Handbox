@@ -457,6 +457,8 @@ export interface ExecuteWorkflowOptions {
   stepMode?: boolean
   /** 스텝 실행 시 다음 노드 진행 시그널 */
   stepSignal?: () => Promise<void>
+  /** 시뮬레이션 모드 - mock 데이터 사용 */
+  isSimulation?: boolean
 }
 
 export async function executeWorkflow(options: ExecuteWorkflowOptions): Promise<void> {
@@ -470,6 +472,7 @@ export async function executeWorkflow(options: ExecuteWorkflowOptions): Promise<
     abortController = new AbortController(),
     stepMode = false,
     stepSignal,
+    isSimulation = false,
   } = options
 
   // 비활성화된 노드 필터링
@@ -499,6 +502,7 @@ export async function executeWorkflow(options: ExecuteWorkflowOptions): Promise<
     onNodeStatusChange,
     abortSignal: abortController.signal,
     breakpointNodeId,
+    isSimulation,
   }
 
   // 스킵된 노드 추적 (분기 비활성 경로)

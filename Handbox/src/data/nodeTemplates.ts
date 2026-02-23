@@ -27,7 +27,7 @@ export const NODE_TEMPLATES: NodeTemplate[] = [
         data: { label: 'LLM', color: '#6366f1', description: 'AI 모델', config: { temperature: 0.7, max_tokens: 2048 } },
       },
       {
-        type: 'output',
+        type: 'viz-result-viewer',
         position: { x: 600, y: 0 },
         data: { label: '출력', color: '#ef4444', description: '결과', config: {} },
       },
@@ -76,7 +76,7 @@ export const NODE_TEMPLATES: NodeTemplate[] = [
         data: { label: 'LLM', color: '#6366f1', description: 'AI 분석', config: { temperature: 0.3 } },
       },
       {
-        type: 'output',
+        type: 'viz-result-viewer',
         position: { x: 650, y: 0 },
         data: { label: '결과', color: '#ef4444', description: '분류 결과', config: {} },
       },
@@ -333,9 +333,9 @@ export const NODE_TEMPLATES: NodeTemplate[] = [
         data: { label: '임베딩', color: '#d8b4fe', description: '벡터화', config: { model: 'titan-embed-v2' } },
       },
       {
-        type: 'vector-opensearch',
+        type: 'rag-retriever',
         position: { x: 600, y: 0 },
-        data: { label: 'OpenSearch', color: '#ff9900', description: '벡터 저장', config: {} },
+        data: { label: '벡터 저장소', color: '#ff9900', description: '벡터 저장 및 검색', config: { search_mode: 'vector' } },
       },
     ],
     edges: [{ sourceIndex: 0, targetIndex: 1 }, { sourceIndex: 1, targetIndex: 2 }, { sourceIndex: 2, targetIndex: 3 }],
@@ -353,9 +353,9 @@ export const NODE_TEMPLATES: NodeTemplate[] = [
         data: { label: '질문', color: '#22c55e', description: '사용자 질문', config: { inputType: 'text' } },
       },
       {
-        type: 'kb-query',
+        type: 'rag-retriever',
         position: { x: 200, y: 0 },
-        data: { label: 'KB 검색', color: '#a855f7', description: '관련 문서 검색', config: { top_k: 5 } },
+        data: { label: 'KB 검색', color: '#a855f7', description: '관련 문서 검색', config: { top_k: 5, search_mode: 'hybrid' } },
       },
       {
         type: 'prompt-template',
@@ -393,14 +393,14 @@ export const NODE_TEMPLATES: NodeTemplate[] = [
         data: { label: '질문', color: '#22c55e', description: '검색 쿼리', config: { inputType: 'text' } },
       },
       {
-        type: 'vector-opensearch',
+        type: 'rag-retriever',
         position: { x: 200, y: 0 },
-        data: { label: '키워드 검색', color: '#3b82f6', description: 'BM25 검색', config: {} },
+        data: { label: '키워드 검색', color: '#3b82f6', description: 'BM25 검색', config: { search_mode: 'keyword', top_k: 5 } },
       },
       {
-        type: 'vector-search',
+        type: 'rag-retriever',
         position: { x: 200, y: 100 },
-        data: { label: '벡터 검색', color: '#e9d5ff', description: 'k-NN 검색', config: { top_k: 5 } },
+        data: { label: '벡터 검색', color: '#e9d5ff', description: 'k-NN 검색', config: { search_mode: 'vector', top_k: 5 } },
       },
       {
         type: 'merge',
