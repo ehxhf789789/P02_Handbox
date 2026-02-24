@@ -1,0 +1,26 @@
+{
+  "tool_id": "core-tools/regex-extract",
+  "version": "1.0.0",
+  "display_name": "Regex Extract",
+  "description": "Extract patterns from text using regular expressions",
+  "capability_tags": ["text.extract", "text.process"],
+  "input_schema": {
+    "ports": [
+      { "name": "text", "port_type": "string", "description": "Text to search", "required": true }
+    ]
+  },
+  "output_schema": {
+    "ports": [
+      { "name": "matches", "port_type": "array", "description": "Array of matched strings" },
+      { "name": "count", "port_type": "number", "description": "Number of matches" }
+    ]
+  },
+  "side_effect": "none",
+  "required_permissions": [],
+  "cost_hint": { "time": "instant", "monetary": "free", "scales_with_input": true },
+  "error_model": { "error_types": [], "idempotent": true, "default_retry": { "max_retries": 0, "backoff_ms": 1000, "backoff_multiplier": 2.0, "max_backoff_ms": 30000 } },
+  "runtime": { "kind": "native" },
+  "config_schema": [
+    { "name": "pattern", "field_type": "string", "description": "Regular expression pattern", "required": true }
+  ]
+}

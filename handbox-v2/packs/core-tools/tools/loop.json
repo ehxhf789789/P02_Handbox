@@ -1,0 +1,26 @@
+{
+  "tool_id": "core-tools/loop",
+  "version": "1.0.0",
+  "display_name": "Loop",
+  "description": "Iterate over an array, executing the connected subgraph for each item",
+  "capability_tags": ["control.loop", "control.flow"],
+  "input_schema": {
+    "ports": [
+      { "name": "items", "port_type": "array", "description": "Items to iterate over", "required": true }
+    ]
+  },
+  "output_schema": {
+    "ports": [
+      { "name": "results", "port_type": "array", "description": "Results from each iteration" },
+      { "name": "item", "port_type": "any", "description": "Current item (during iteration)" }
+    ]
+  },
+  "side_effect": "none",
+  "required_permissions": [],
+  "cost_hint": { "time": "medium", "monetary": "free", "scales_with_input": true },
+  "error_model": { "error_types": [], "idempotent": true, "default_retry": { "max_retries": 0, "backoff_ms": 1000, "backoff_multiplier": 2.0, "max_backoff_ms": 30000 } },
+  "runtime": { "kind": "native" },
+  "config_schema": [
+    { "name": "max_iterations", "field_type": "number", "description": "Maximum iterations", "default_value": 100 }
+  ]
+}

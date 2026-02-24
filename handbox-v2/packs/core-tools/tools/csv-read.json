@@ -1,0 +1,35 @@
+{
+  "tool_id": "core-tools/csv-read",
+  "version": "1.0.0",
+  "display_name": "CSV Read",
+  "description": "Read and parse a CSV file into structured rows",
+  "capability_tags": ["file.read", "data.parse", "data.csv"],
+  "input_schema": {
+    "ports": [
+      { "name": "path", "port_type": "string", "description": "CSV file path", "required": true }
+    ]
+  },
+  "output_schema": {
+    "ports": [
+      { "name": "rows", "port_type": "array", "description": "Array of row objects" },
+      { "name": "headers", "port_type": "array", "description": "Column headers" },
+      { "name": "count", "port_type": "number", "description": "Number of rows" }
+    ]
+  },
+  "side_effect": "read",
+  "required_permissions": ["fs.read"],
+  "cost_hint": { "time": "fast", "monetary": "free", "scales_with_input": true },
+  "error_model": {
+    "error_types": [
+      { "code": "FILE_NOT_FOUND", "description": "CSV file not found", "retryable": false },
+      { "code": "PARSE_ERROR", "description": "Invalid CSV format", "retryable": false }
+    ],
+    "idempotent": true,
+    "default_retry": { "max_retries": 0, "backoff_ms": 1000, "backoff_multiplier": 2.0, "max_backoff_ms": 30000 }
+  },
+  "runtime": { "kind": "native" },
+  "config_schema": [
+    { "name": "delimiter", "field_type": "string", "description": "Column delimiter", "default_value": "," },
+    { "name": "has_header", "field_type": "boolean", "description": "First row is header", "default_value": true }
+  ]
+}

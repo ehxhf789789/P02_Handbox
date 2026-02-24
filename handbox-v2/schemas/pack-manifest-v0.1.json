@@ -1,0 +1,82 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://handbox.dev/schemas/pack-manifest-v0.1.json",
+  "title": "PackManifest",
+  "description": "Handbox v2 Pack Manifest v0.1 — extension unit with tools, templates, and composites",
+  "type": "object",
+  "required": [
+    "pack_version", "id", "version", "name", "description",
+    "author", "license", "platform_version", "category", "tools"
+  ],
+  "properties": {
+    "pack_version": {
+      "type": "string",
+      "const": "0.1.0"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+"
+    },
+    "name": { "type": "string" },
+    "description": { "type": "string" },
+    "author": { "type": "string" },
+    "license": { "type": "string" },
+    "platform_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+"
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["pack_id", "version_range"],
+        "properties": {
+          "pack_id": { "type": "string" },
+          "version_range": { "type": "string" },
+          "optional": { "type": "boolean", "default": false }
+        }
+      },
+      "default": []
+    },
+    "category": {
+      "type": "string",
+      "enum": ["core", "ai", "rag", "data", "document", "export", "integration", "ml", "custom"]
+    },
+    "tools": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1
+    },
+    "templates": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "composites": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "runtime_requirements": {
+      "type": "object",
+      "properties": {
+        "python": { "type": "string" },
+        "docker": { "type": "boolean" },
+        "native_deps": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        },
+        "os": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "tool_id": "core-tools/vector-store",
+  "version": "1.0.0",
+  "display_name": "Vector Store",
+  "description": "Store vectors and associated text chunks in a local vector database",
+  "capability_tags": ["rag.store", "data.vector"],
+  "input_schema": {
+    "ports": [
+      { "name": "vectors", "port_type": "array", "description": "Embedding vectors", "required": true },
+      { "name": "chunks", "port_type": "array", "description": "Text chunks to associate" }
+    ]
+  },
+  "output_schema": {
+    "ports": [
+      { "name": "index_id", "port_type": "string", "description": "ID of the created/updated index" },
+      { "name": "count", "port_type": "number", "description": "Number of stored vectors" }
+    ]
+  },
+  "side_effect": "write",
+  "required_permissions": ["fs.write"],
+  "cost_hint": { "time": "medium", "monetary": "free", "scales_with_input": true },
+  "error_model": { "error_types": [], "idempotent": true, "default_retry": { "max_retries": 0, "backoff_ms": 1000, "backoff_multiplier": 2.0, "max_backoff_ms": 30000 } },
+  "runtime": { "kind": "native" },
+  "config_schema": [
+    { "name": "index_name", "field_type": "string", "description": "Index name", "default_value": "default" }
+  ]
+}

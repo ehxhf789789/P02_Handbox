@@ -1,0 +1,28 @@
+{
+  "tool_id": "core-tools/json-parse",
+  "version": "1.0.0",
+  "display_name": "JSON Parse",
+  "description": "Parse a JSON string into structured data",
+  "capability_tags": ["data.parse", "data.json"],
+  "input_schema": {
+    "ports": [
+      { "name": "json_string", "port_type": "string", "description": "JSON string to parse", "required": true }
+    ]
+  },
+  "output_schema": {
+    "ports": [
+      { "name": "data", "port_type": "json", "description": "Parsed JSON data" }
+    ]
+  },
+  "side_effect": "none",
+  "required_permissions": [],
+  "cost_hint": { "time": "instant", "monetary": "free", "scales_with_input": true },
+  "error_model": {
+    "error_types": [
+      { "code": "PARSE_ERROR", "description": "Invalid JSON", "retryable": false }
+    ],
+    "idempotent": true,
+    "default_retry": { "max_retries": 0, "backoff_ms": 1000, "backoff_multiplier": 2.0, "max_backoff_ms": 30000 }
+  },
+  "runtime": { "kind": "native" }
+}

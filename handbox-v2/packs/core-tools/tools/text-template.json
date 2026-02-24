@@ -1,0 +1,23 @@
+{
+  "tool_id": "core-tools/text-template",
+  "version": "1.0.0",
+  "display_name": "Text Template",
+  "description": "Fill a text template with variables",
+  "capability_tags": ["text.template", "text.process"],
+  "input_schema": {
+    "ports": [
+      { "name": "template", "port_type": "string", "description": "Template with {{variable}} placeholders", "required": true },
+      { "name": "variables", "port_type": "json", "description": "Variables to fill in" }
+    ]
+  },
+  "output_schema": {
+    "ports": [
+      { "name": "result", "port_type": "string", "description": "Filled template" }
+    ]
+  },
+  "side_effect": "none",
+  "required_permissions": [],
+  "cost_hint": { "time": "instant", "monetary": "free", "scales_with_input": false },
+  "error_model": { "error_types": [], "idempotent": true, "default_retry": { "max_retries": 0, "backoff_ms": 1000, "backoff_multiplier": 2.0, "max_backoff_ms": 30000 } },
+  "runtime": { "kind": "native" }
+}

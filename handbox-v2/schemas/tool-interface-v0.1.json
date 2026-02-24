@@ -1,0 +1,193 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://handbox.dev/schemas/tool-interface-v0.1.json",
+  "title": "ToolInterface",
+  "description": "Handbox v2 Tool Interface v0.1 — contract every tool must satisfy",
+  "type": "object",
+  "required": [
+    "tool_id", "version", "display_name", "description",
+    "capability_tags", "input_schema", "output_schema",
+    "side_effect", "required_permissions", "cost_hint",
+    "error_model", "runtime"
+  ],
+  "properties": {
+    "tool_id": {
+      "type": "string",
+      "description": "Fully-qualified ID: {pack_id}/{tool_name}"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+"
+    },
+    "display_name": { "type": "string" },
+    "description": { "type": "string" },
+    "capability_tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1
+    },
+    "input_schema": { "$ref": "#/$defs/PortSchema" },
+    "output_schema": { "$ref": "#/$defs/PortSchema" },
+    "side_effect": {
+      "type": "string",
+      "enum": ["none", "read", "write", "network", "process"]
+    },
+    "required_permissions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "cost_hint": { "$ref": "#/$defs/CostHint" },
+    "error_model": { "$ref": "#/$defs/ErrorModel" },
+    "runtime": { "$ref": "#/$defs/RuntimeSpec" },
+    "config_schema": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ConfigField" },
+      "default": []
+    }
+  },
+  "$defs": {
+    "PortSchema": {
+      "type": "object",
+      "required": ["ports"],
+      "properties": {
+        "ports": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "port_type"],
+            "properties": {
+              "name": { "type": "string" },
+              "port_type": {
+                "type": "string",
+                "enum": ["string", "number", "boolean", "json", "array", "binary", "any"]
+              },
+              "description": { "type": "string" },
+              "required": { "type": "boolean", "default": false },
+              "default_value": {}
+            }
+          }
+        }
+      }
+    },
+    "CostHint": {
+      "type": "object",
+      "required": ["time", "monetary"],
+      "properties": {
+        "time": { "enum": ["instant", "fast", "medium", "slow", "very_slow"] },
+        "monetary": { "enum": ["free", "cheap", "moderate", "expensive"] },
+        "scales_with_input": { "type": "boolean", "default": false },
+        "estimated_tokens": {
+          "type": "object",
+          "properties": {
+            "input": { "type": "integer", "minimum": 0 },
+            "output": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "ErrorModel": {
+      "type": "object",
+      "required": ["error_types", "idempotent", "default_retry"],
+      "properties": {
+        "error_types": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["code", "description", "retryable"],
+            "properties": {
+              "code": { "type": "string" },
+              "description": { "type": "string" },
+              "retryable": { "type": "boolean" }
+            }
+          }
+        },
+        "idempotent": { "type": "boolean" },
+        "default_retry": {
+          "type": "object",
+          "properties": {
+            "max_retries": { "type": "integer", "minimum": 0 },
+            "backoff_ms": { "type": "integer", "minimum": 0 },
+            "backoff_multiplier": { "type": "number", "minimum": 1 },
+            "max_backoff_ms": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "RuntimeSpec": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind"],
+          "properties": { "kind": { "const": "native" } }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "command"],
+          "properties": {
+            "kind": { "const": "process" },
+            "command": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "script"],
+          "properties": {
+            "kind": { "const": "python" },
+            "script": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "image"],
+          "properties": {
+            "kind": { "const": "docker" },
+            "image": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "module"],
+          "properties": {
+            "kind": { "const": "wasm" },
+            "module": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "server_id"],
+          "properties": {
+            "kind": { "const": "mcp" },
+            "server_id": { "type": "string" }
+          }
+        }
+      ]
+    },
+    "ConfigField": {
+      "type": "object",
+      "required": ["name", "field_type", "label", "required"],
+      "properties": {
+        "name": { "type": "string" },
+        "field_type": {
+          "type": "string",
+          "enum": ["string", "number", "boolean", "select", "multi_select", "file_path", "json"]
+        },
+        "label": { "type": "string" },
+        "description": { "type": "string" },
+        "default_value": {},
+        "required": { "type": "boolean" },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["label", "value"],
+            "properties": {
+              "label": { "type": "string" },
+              "value": {}
+            }
+          },
+          "default": []
+        }
+      }
+    }
+  }
+}

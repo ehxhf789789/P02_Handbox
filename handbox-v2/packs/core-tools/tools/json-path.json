@@ -1,0 +1,23 @@
+{
+  "tool_id": "core-tools/json-path",
+  "version": "1.0.0",
+  "display_name": "JSON Path",
+  "description": "Extract values from JSON using JMESPath expressions",
+  "capability_tags": ["data.query", "data.json"],
+  "input_schema": {
+    "ports": [
+      { "name": "data", "port_type": "json", "description": "JSON input data", "required": true },
+      { "name": "expression", "port_type": "string", "description": "JMESPath expression", "required": true }
+    ]
+  },
+  "output_schema": {
+    "ports": [
+      { "name": "result", "port_type": "any", "description": "Extracted value" }
+    ]
+  },
+  "side_effect": "none",
+  "required_permissions": [],
+  "cost_hint": { "time": "instant", "monetary": "free", "scales_with_input": true },
+  "error_model": { "error_types": [], "idempotent": true, "default_retry": { "max_retries": 0, "backoff_ms": 1000, "backoff_multiplier": 2.0, "max_backoff_ms": 30000 } },
+  "runtime": { "kind": "native" }
+}

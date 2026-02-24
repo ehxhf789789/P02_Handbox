@@ -1,0 +1,26 @@
+{
+  "tool_id": "core-tools/to-excel",
+  "version": "1.0.0",
+  "display_name": "Export Excel",
+  "description": "Export data to an Excel spreadsheet",
+  "capability_tags": ["export.excel", "file.write"],
+  "input_schema": {
+    "ports": [
+      { "name": "data", "port_type": "array", "description": "Rows of data to export", "required": true }
+    ]
+  },
+  "output_schema": {
+    "ports": [
+      { "name": "path", "port_type": "string", "description": "Generated Excel path" }
+    ]
+  },
+  "side_effect": "write",
+  "required_permissions": ["fs.write"],
+  "cost_hint": { "time": "medium", "monetary": "free", "scales_with_input": true },
+  "error_model": { "error_types": [], "idempotent": true, "default_retry": { "max_retries": 0, "backoff_ms": 1000, "backoff_multiplier": 2.0, "max_backoff_ms": 30000 } },
+  "runtime": { "kind": "native" },
+  "config_schema": [
+    { "name": "filename", "field_type": "string", "description": "Output filename", "default_value": "output.xlsx" },
+    { "name": "sheet_name", "field_type": "string", "description": "Sheet name", "default_value": "Sheet1" }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "tool_id": "core-tools/merge",
+  "version": "1.0.0",
+  "display_name": "Merge",
+  "description": "Merge multiple inputs into a single output",
+  "capability_tags": ["control.merge", "data.combine"],
+  "input_schema": {
+    "ports": [
+      { "name": "input_a", "port_type": "any", "description": "First input" },
+      { "name": "input_b", "port_type": "any", "description": "Second input" },
+      { "name": "input_c", "port_type": "any", "description": "Third input (optional)" }
+    ]
+  },
+  "output_schema": {
+    "ports": [
+      { "name": "merged", "port_type": "any", "description": "Merged output" }
+    ]
+  },
+  "side_effect": "none",
+  "required_permissions": [],
+  "cost_hint": { "time": "instant", "monetary": "free", "scales_with_input": false },
+  "error_model": { "error_types": [], "idempotent": true, "default_retry": { "max_retries": 0, "backoff_ms": 1000, "backoff_multiplier": 2.0, "max_backoff_ms": 30000 } },
+  "runtime": { "kind": "native" },
+  "config_schema": [
+    { "name": "strategy", "field_type": "string", "description": "Merge strategy: concat, object_merge, array", "default_value": "concat" }
+  ]
+}

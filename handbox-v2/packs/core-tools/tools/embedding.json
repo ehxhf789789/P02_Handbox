@@ -1,0 +1,32 @@
+{
+  "tool_id": "core-tools/embedding",
+  "version": "1.0.0",
+  "display_name": "Embedding",
+  "description": "Generate vector embeddings from text",
+  "capability_tags": ["rag.embed", "ai.embedding"],
+  "input_schema": {
+    "ports": [
+      { "name": "text", "port_type": "string", "description": "Text to embed", "required": true }
+    ]
+  },
+  "output_schema": {
+    "ports": [
+      { "name": "vector", "port_type": "array", "description": "Embedding vector" },
+      { "name": "dimension", "port_type": "number", "description": "Vector dimension" }
+    ]
+  },
+  "side_effect": "network",
+  "required_permissions": ["network.outbound"],
+  "cost_hint": { "time": "fast", "monetary": "cheap", "scales_with_input": true },
+  "error_model": {
+    "error_types": [
+      { "code": "RATE_LIMITED", "description": "API rate limit", "retryable": true }
+    ],
+    "idempotent": true,
+    "default_retry": { "max_retries": 3, "backoff_ms": 1000, "backoff_multiplier": 2.0, "max_backoff_ms": 30000 }
+  },
+  "runtime": { "kind": "native" },
+  "config_schema": [
+    { "name": "model", "field_type": "string", "description": "Embedding model", "default_value": "text-embedding-3-small" }
+  ]
+}

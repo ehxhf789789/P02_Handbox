@@ -1,0 +1,18 @@
+{
+  "tool_id": "core-tools/user-input",
+  "version": "1.0.0",
+  "display_name": "User Input",
+  "description": "Receive input from the user at runtime",
+  "capability_tags": ["io.input", "ui.prompt"],
+  "input_schema": { "ports": [] },
+  "output_schema": {
+    "ports": [
+      { "name": "text", "port_type": "string", "description": "User-provided text" }
+    ]
+  },
+  "side_effect": "none",
+  "required_permissions": [],
+  "cost_hint": { "time": "slow", "monetary": "free", "scales_with_input": false },
+  "error_model": { "error_types": [], "idempotent": true, "default_retry": { "max_retries": 0, "backoff_ms": 1000, "backoff_multiplier": 2.0, "max_backoff_ms": 30000 } },
+  "runtime": { "kind": "native" }
+}

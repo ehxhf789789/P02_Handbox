@@ -1,0 +1,15 @@
+[package]
+name = "hb-core"
+description = "Handbox v2 shared types — zero internal dependencies"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+semver = { workspace = true }
+thiserror = { workspace = true }

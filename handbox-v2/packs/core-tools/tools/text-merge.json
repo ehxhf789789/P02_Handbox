@@ -1,0 +1,25 @@
+{
+  "tool_id": "core-tools/text-merge",
+  "version": "1.0.0",
+  "display_name": "Text Merge",
+  "description": "Merge multiple text chunks into a single document",
+  "capability_tags": ["text.merge", "text.process"],
+  "input_schema": {
+    "ports": [
+      { "name": "texts", "port_type": "array", "description": "Array of texts to merge", "required": true }
+    ]
+  },
+  "output_schema": {
+    "ports": [
+      { "name": "merged", "port_type": "string", "description": "Merged text" }
+    ]
+  },
+  "side_effect": "none",
+  "required_permissions": [],
+  "cost_hint": { "time": "instant", "monetary": "free", "scales_with_input": true },
+  "error_model": { "error_types": [], "idempotent": true, "default_retry": { "max_retries": 0, "backoff_ms": 1000, "backoff_multiplier": 2.0, "max_backoff_ms": 30000 } },
+  "runtime": { "kind": "native" },
+  "config_schema": [
+    { "name": "separator", "field_type": "string", "description": "Separator between chunks", "default_value": "\n\n" }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "tool_id": "core-tools/file-read",
+  "version": "1.0.0",
+  "display_name": "File Read",
+  "description": "Read file content from the local filesystem",
+  "capability_tags": ["file.read", "io.input"],
+  "input_schema": {
+    "ports": [
+      { "name": "path", "port_type": "string", "description": "File path to read", "required": true }
+    ]
+  },
+  "output_schema": {
+    "ports": [
+      { "name": "content", "port_type": "string", "description": "File content" },
+      { "name": "size", "port_type": "number", "description": "File size in bytes" }
+    ]
+  },
+  "side_effect": "read",
+  "required_permissions": ["fs.read"],
+  "cost_hint": { "time": "fast", "monetary": "free", "scales_with_input": true },
+  "error_model": {
+    "error_types": [
+      { "code": "FILE_NOT_FOUND", "description": "File does not exist", "retryable": false },
+      { "code": "PERMISSION_DENIED", "description": "No read access", "retryable": false }
+    ],
+    "idempotent": true,
+    "default_retry": { "max_retries": 0, "backoff_ms": 1000, "backoff_multiplier": 2.0, "max_backoff_ms": 30000 }
+  },
+  "runtime": { "kind": "native" }
+}

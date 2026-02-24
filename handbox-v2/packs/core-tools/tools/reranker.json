@@ -1,0 +1,32 @@
+{
+  "tool_id": "core-tools/reranker",
+  "version": "1.0.0",
+  "display_name": "Reranker",
+  "description": "Rerank search results based on relevance to query",
+  "capability_tags": ["rag.rerank", "ai.ranking"],
+  "input_schema": {
+    "ports": [
+      { "name": "query", "port_type": "string", "description": "Query text", "required": true },
+      { "name": "documents", "port_type": "array", "description": "Documents to rerank", "required": true }
+    ]
+  },
+  "output_schema": {
+    "ports": [
+      { "name": "ranked", "port_type": "array", "description": "Reranked documents" }
+    ]
+  },
+  "side_effect": "network",
+  "required_permissions": ["network.outbound"],
+  "cost_hint": { "time": "medium", "monetary": "cheap", "scales_with_input": true },
+  "error_model": {
+    "error_types": [
+      { "code": "RATE_LIMITED", "description": "API rate limit", "retryable": true }
+    ],
+    "idempotent": true,
+    "default_retry": { "max_retries": 3, "backoff_ms": 1000, "backoff_multiplier": 2.0, "max_backoff_ms": 30000 }
+  },
+  "runtime": { "kind": "native" },
+  "config_schema": [
+    { "name": "top_k", "field_type": "number", "description": "Number of top results", "default_value": 5 }
+  ]
+}

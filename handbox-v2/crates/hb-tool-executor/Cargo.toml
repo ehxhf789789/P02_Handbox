@@ -1,0 +1,16 @@
+[package]
+name = "hb-tool-executor"
+description = "Tool executor — isolated execution via local process, Python, Docker, WASM"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+hb-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }

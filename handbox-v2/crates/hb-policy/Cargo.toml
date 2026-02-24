@@ -1,0 +1,14 @@
+[package]
+name = "hb-policy"
+description = "Policy engine — tool whitelists, cost budgets, permission checks"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+hb-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

@@ -1,0 +1,25 @@
+{
+  "tool_id": "core-tools/to-pdf",
+  "version": "1.0.0",
+  "display_name": "Export PDF",
+  "description": "Export content to a PDF file",
+  "capability_tags": ["export.pdf", "file.write"],
+  "input_schema": {
+    "ports": [
+      { "name": "content", "port_type": "string", "description": "Content to export", "required": true }
+    ]
+  },
+  "output_schema": {
+    "ports": [
+      { "name": "path", "port_type": "string", "description": "Generated PDF path" }
+    ]
+  },
+  "side_effect": "write",
+  "required_permissions": ["fs.write"],
+  "cost_hint": { "time": "medium", "monetary": "free", "scales_with_input": true },
+  "error_model": { "error_types": [], "idempotent": true, "default_retry": { "max_retries": 0, "backoff_ms": 1000, "backoff_multiplier": 2.0, "max_backoff_ms": 30000 } },
+  "runtime": { "kind": "native" },
+  "config_schema": [
+    { "name": "filename", "field_type": "string", "description": "Output filename", "default_value": "output.pdf" }
+  ]
+}

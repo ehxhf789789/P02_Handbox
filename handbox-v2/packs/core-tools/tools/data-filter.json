@@ -1,0 +1,26 @@
+{
+  "tool_id": "core-tools/data-filter",
+  "version": "1.0.0",
+  "display_name": "Data Filter",
+  "description": "Filter an array of items using conditions",
+  "capability_tags": ["data.filter", "data.transform"],
+  "input_schema": {
+    "ports": [
+      { "name": "items", "port_type": "array", "description": "Array of items to filter", "required": true }
+    ]
+  },
+  "output_schema": {
+    "ports": [
+      { "name": "filtered", "port_type": "array", "description": "Filtered items" },
+      { "name": "count", "port_type": "number", "description": "Number of matching items" }
+    ]
+  },
+  "side_effect": "none",
+  "required_permissions": [],
+  "cost_hint": { "time": "instant", "monetary": "free", "scales_with_input": true },
+  "error_model": { "error_types": [], "idempotent": true, "default_retry": { "max_retries": 0, "backoff_ms": 1000, "backoff_multiplier": 2.0, "max_backoff_ms": 30000 } },
+  "runtime": { "kind": "native" },
+  "config_schema": [
+    { "name": "expression", "field_type": "string", "description": "Filter expression (JMESPath)" }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "tool_id": "core-tools/text-split",
+  "version": "1.0.0",
+  "display_name": "Text Split",
+  "description": "Split text into chunks by size or separator",
+  "capability_tags": ["text.split", "text.process"],
+  "input_schema": {
+    "ports": [
+      { "name": "text", "port_type": "string", "description": "Text to split", "required": true }
+    ]
+  },
+  "output_schema": {
+    "ports": [
+      { "name": "chunks", "port_type": "array", "description": "Array of text chunks" },
+      { "name": "count", "port_type": "number", "description": "Number of chunks" }
+    ]
+  },
+  "side_effect": "none",
+  "required_permissions": [],
+  "cost_hint": { "time": "instant", "monetary": "free", "scales_with_input": true },
+  "error_model": {
+    "error_types": [],
+    "idempotent": true,
+    "default_retry": { "max_retries": 0, "backoff_ms": 1000, "backoff_multiplier": 2.0, "max_backoff_ms": 30000 }
+  },
+  "runtime": { "kind": "native" },
+  "config_schema": [
+    { "name": "chunk_size", "field_type": "number", "description": "Max characters per chunk", "default_value": 1000 },
+    { "name": "overlap", "field_type": "number", "description": "Overlap between chunks", "default_value": 100 },
+    { "name": "separator", "field_type": "string", "description": "Split separator pattern" }
+  ]
+}

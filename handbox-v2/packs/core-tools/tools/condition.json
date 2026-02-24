@@ -1,0 +1,26 @@
+{
+  "tool_id": "core-tools/condition",
+  "version": "1.0.0",
+  "display_name": "Condition",
+  "description": "Conditional branching — route data based on expressions",
+  "capability_tags": ["control.condition", "control.flow"],
+  "input_schema": {
+    "ports": [
+      { "name": "value", "port_type": "any", "description": "Value to evaluate", "required": true }
+    ]
+  },
+  "output_schema": {
+    "ports": [
+      { "name": "true_out", "port_type": "any", "description": "Output when condition is true" },
+      { "name": "false_out", "port_type": "any", "description": "Output when condition is false" }
+    ]
+  },
+  "side_effect": "none",
+  "required_permissions": [],
+  "cost_hint": { "time": "instant", "monetary": "free", "scales_with_input": false },
+  "error_model": { "error_types": [], "idempotent": true, "default_retry": { "max_retries": 0, "backoff_ms": 1000, "backoff_multiplier": 2.0, "max_backoff_ms": 30000 } },
+  "runtime": { "kind": "native" },
+  "config_schema": [
+    { "name": "expression", "field_type": "string", "description": "Condition expression" }
+  ]
+}

@@ -1,0 +1,219 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://handbox.dev/schemas/graph-dsl-v0.1.json",
+  "title": "WorkflowSpec",
+  "description": "Handbox v2 Graph DSL v0.1 — ReactFlow-independent executable workflow specification",
+  "type": "object",
+  "required": ["version", "id", "meta", "nodes", "edges"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "0.1.0"
+    },
+    "id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "meta": { "$ref": "#/$defs/WorkflowMeta" },
+    "variables": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/VariableSpec" },
+      "default": []
+    },
+    "nodes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/NodeEntry" }
+    },
+    "edges": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/EdgeSpec" }
+    },
+    "required_packs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/PackDependency" },
+      "default": []
+    }
+  },
+  "$defs": {
+    "WorkflowMeta": {
+      "type": "object",
+      "required": ["name", "description"],
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "author": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" }, "default": [] },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "VariableSpec": {
+      "type": "object",
+      "required": ["name", "var_type", "required"],
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "var_type": { "$ref": "#/$defs/PortType" },
+        "default_value": {},
+        "required": { "type": "boolean" }
+      }
+    },
+    "NodeEntry": {
+      "oneOf": [
+        { "$ref": "#/$defs/PrimitiveNode" },
+        { "$ref": "#/$defs/CompositeNode" },
+        { "$ref": "#/$defs/ConditionalNode" },
+        { "$ref": "#/$defs/LoopNode" }
+      ]
+    },
+    "PrimitiveNode": {
+      "type": "object",
+      "required": ["kind", "id", "tool_ref"],
+      "properties": {
+        "kind": { "const": "primitive" },
+        "id": { "type": "string" },
+        "tool_ref": { "type": "string", "pattern": "^[a-z0-9-]+/[a-z0-9-]+@" },
+        "config": { "type": "object", "default": {} },
+        "position": { "$ref": "#/$defs/Position" },
+        "label": { "type": "string" },
+        "disabled": { "type": "boolean", "default": false },
+        "retry": { "$ref": "#/$defs/RetryPolicy" },
+        "cache": { "$ref": "#/$defs/CachePolicy" }
+      }
+    },
+    "CompositeNode": {
+      "type": "object",
+      "required": ["kind", "id", "subgraph", "input_ports", "output_ports"],
+      "properties": {
+        "kind": { "const": "composite" },
+        "id": { "type": "string" },
+        "subgraph": { "$ref": "#/$defs/SubgraphSpec" },
+        "input_ports": { "type": "array", "items": { "$ref": "#/$defs/PortSpec" } },
+        "output_ports": { "type": "array", "items": { "$ref": "#/$defs/PortSpec" } },
+        "input_mapping": { "type": "array", "items": { "$ref": "#/$defs/PortMapping" }, "default": [] },
+        "output_mapping": { "type": "array", "items": { "$ref": "#/$defs/PortMapping" }, "default": [] },
+        "position": { "$ref": "#/$defs/Position" },
+        "label": { "type": "string" }
+      }
+    },
+    "ConditionalNode": {
+      "type": "object",
+      "required": ["kind", "id", "condition_kind", "condition_expr", "branches"],
+      "properties": {
+        "kind": { "const": "conditional" },
+        "id": { "type": "string" },
+        "condition_kind": { "enum": ["if", "switch"] },
+        "condition_expr": { "type": "string" },
+        "branches": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Branch" }
+        },
+        "default_branch": { "$ref": "#/$defs/SubgraphSpec" }
+      }
+    },
+    "LoopNode": {
+      "type": "object",
+      "required": ["kind", "id", "loop_kind", "body", "max_iterations"],
+      "properties": {
+        "kind": { "const": "loop" },
+        "id": { "type": "string" },
+        "loop_kind": { "enum": ["for_each", "while", "repeat"] },
+        "body": { "$ref": "#/$defs/SubgraphSpec" },
+        "max_iterations": { "type": "integer", "minimum": 1 },
+        "condition_expr": { "type": "string" },
+        "items_expr": { "type": "string" }
+      }
+    },
+    "SubgraphSpec": {
+      "type": "object",
+      "required": ["nodes", "edges"],
+      "properties": {
+        "nodes": { "type": "array", "items": { "$ref": "#/$defs/NodeEntry" } },
+        "edges": { "type": "array", "items": { "$ref": "#/$defs/EdgeSpec" } }
+      }
+    },
+    "EdgeSpec": {
+      "type": "object",
+      "required": ["id", "source_node", "source_port", "target_node", "target_port"],
+      "properties": {
+        "id": { "type": "string" },
+        "source_node": { "type": "string" },
+        "source_port": { "type": "string" },
+        "target_node": { "type": "string" },
+        "target_port": { "type": "string" },
+        "kind": { "$ref": "#/$defs/EdgeKind" },
+        "transform": { "type": "string" }
+      }
+    },
+    "EdgeKind": {
+      "type": "string",
+      "enum": ["data", "control", "error"],
+      "default": "data"
+    },
+    "PortSpec": {
+      "type": "object",
+      "required": ["name", "port_type"],
+      "properties": {
+        "name": { "type": "string" },
+        "port_type": { "$ref": "#/$defs/PortType" },
+        "description": { "type": "string" },
+        "required": { "type": "boolean", "default": false },
+        "default_value": {}
+      }
+    },
+    "PortType": {
+      "type": "string",
+      "enum": ["string", "number", "boolean", "json", "array", "binary", "any"]
+    },
+    "PortMapping": {
+      "type": "object",
+      "required": ["external_port", "node", "port"],
+      "properties": {
+        "external_port": { "type": "string" },
+        "node": { "type": "string" },
+        "port": { "type": "string" }
+      }
+    },
+    "Position": {
+      "type": "object",
+      "required": ["x", "y"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" }
+      }
+    },
+    "RetryPolicy": {
+      "type": "object",
+      "properties": {
+        "max_retries": { "type": "integer", "minimum": 0, "default": 3 },
+        "backoff_ms": { "type": "integer", "minimum": 0, "default": 1000 },
+        "backoff_multiplier": { "type": "number", "minimum": 1, "default": 2.0 },
+        "max_backoff_ms": { "type": "integer", "minimum": 0, "default": 30000 }
+      }
+    },
+    "CachePolicy": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "ttl_secs": { "type": "integer", "minimum": 0, "default": 0 }
+      }
+    },
+    "PackDependency": {
+      "type": "object",
+      "required": ["pack_id", "version_range"],
+      "properties": {
+        "pack_id": { "type": "string" },
+        "version_range": { "type": "string" }
+      }
+    },
+    "Branch": {
+      "type": "object",
+      "required": ["label", "value", "body"],
+      "properties": {
+        "label": { "type": "string" },
+        "value": {},
+        "body": { "$ref": "#/$defs/SubgraphSpec" }
+      }
+    }
+  }
+}

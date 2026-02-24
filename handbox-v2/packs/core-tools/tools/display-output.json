@@ -1,0 +1,18 @@
+{
+  "tool_id": "core-tools/display-output",
+  "version": "1.0.0",
+  "display_name": "Display Output",
+  "description": "Display data to the user in the output panel",
+  "capability_tags": ["io.output", "ui.display"],
+  "input_schema": {
+    "ports": [
+      { "name": "data", "port_type": "any", "description": "Data to display", "required": true }
+    ]
+  },
+  "output_schema": { "ports": [] },
+  "side_effect": "none",
+  "required_permissions": [],
+  "cost_hint": { "time": "instant", "monetary": "free", "scales_with_input": false },
+  "error_model": { "error_types": [], "idempotent": true, "default_retry": { "max_retries": 0, "backoff_ms": 1000, "backoff_multiplier": 2.0, "max_backoff_ms": 30000 } },
+  "runtime": { "kind": "native" }
+}

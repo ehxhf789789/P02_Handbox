@@ -1,0 +1,30 @@
+{
+  "tool_id": "core-tools/file-write",
+  "version": "1.0.0",
+  "display_name": "File Write",
+  "description": "Write content to a file on the local filesystem",
+  "capability_tags": ["file.write", "io.output"],
+  "input_schema": {
+    "ports": [
+      { "name": "path", "port_type": "string", "description": "File path to write", "required": true },
+      { "name": "content", "port_type": "string", "description": "Content to write", "required": true }
+    ]
+  },
+  "output_schema": {
+    "ports": [
+      { "name": "path", "port_type": "string", "description": "Written file path" },
+      { "name": "size", "port_type": "number", "description": "Written bytes" }
+    ]
+  },
+  "side_effect": "write",
+  "required_permissions": ["fs.write"],
+  "cost_hint": { "time": "fast", "monetary": "free", "scales_with_input": true },
+  "error_model": {
+    "error_types": [
+      { "code": "PERMISSION_DENIED", "description": "No write access", "retryable": false }
+    ],
+    "idempotent": true,
+    "default_retry": { "max_retries": 0, "backoff_ms": 1000, "backoff_multiplier": 2.0, "max_backoff_ms": 30000 }
+  },
+  "runtime": { "kind": "native" }
+}

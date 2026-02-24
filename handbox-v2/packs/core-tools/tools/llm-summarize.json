@@ -1,0 +1,32 @@
+{
+  "tool_id": "core-tools/llm-summarize",
+  "version": "1.0.0",
+  "display_name": "LLM Summarize",
+  "description": "Summarize text using an LLM",
+  "capability_tags": ["llm.summarize", "ai.generate", "text.process"],
+  "input_schema": {
+    "ports": [
+      { "name": "text", "port_type": "string", "description": "Text to summarize", "required": true }
+    ]
+  },
+  "output_schema": {
+    "ports": [
+      { "name": "summary", "port_type": "string", "description": "Summarized text" }
+    ]
+  },
+  "side_effect": "network",
+  "required_permissions": ["network.outbound"],
+  "cost_hint": { "time": "slow", "monetary": "moderate", "scales_with_input": true, "estimated_tokens": { "input": 1000, "output": 200 } },
+  "error_model": {
+    "error_types": [
+      { "code": "RATE_LIMITED", "description": "API rate limit hit", "retryable": true }
+    ],
+    "idempotent": false,
+    "default_retry": { "max_retries": 3, "backoff_ms": 2000, "backoff_multiplier": 2.0, "max_backoff_ms": 30000 }
+  },
+  "runtime": { "kind": "native" },
+  "config_schema": [
+    { "name": "max_length", "field_type": "number", "description": "Maximum summary length", "default_value": 500 },
+    { "name": "model", "field_type": "string", "description": "LLM model name", "default_value": "claude-sonnet-4-20250514" }
+  ]
+}
