@@ -1395,18 +1395,27 @@ class IntegratedWorkflowAgentImpl {
 - ❌ \`display_results\` - 존재하지 않음 (결과 표시는 \`viz.result-viewer\` 사용)
 - ❌ \`kb.create\`, \`kb.query\` - Knowledge Base 노드는 없음 (RAG는 \`rag.retriever\` 사용)
 - ❌ \`retrieve\` - 존재하지 않음 (RAG 검색은 \`rag.retriever\` 사용)
-- ❌ \`retrieve_relevant_laws\`, \`analyze_additions\` - 함수 이름 형식 불가! (\`rag.retriever\`, \`ai.llm-invoke\` 사용)
-- ❌ \`extract_*\`, \`analyze_*\`, \`process_*\`, \`get_*\`, \`search_*\` - 함수명 패턴 노드는 존재하지 않음
-- ❌ \`search_docs\` - 존재하지 않음 (문서 검색은 \`rag.retriever\` 사용)
-- ❌ \`image_analysis\` - 존재하지 않음 (이미지 분석은 \`vision.image-analyzer\` 사용)
-- ❌ \`result_display\` - 존재하지 않음 (결과 표시는 \`viz.result-viewer\` 사용)
 
-⚠️ **중요: 노드 타입 명명 규칙**
-- ✅ 정확한 노드 타입만 사용: \`io.local-file\`, \`ai.llm-invoke\`, \`viz.result-viewer\` 등
-- ✅ **노드 타입은 반드시 "카테고리.이름" 형식입니다** (예: io.local-file, ai.llm-invoke)
-- ✅ **벡터 저장/검색**: \`ai.embedding\` → \`rag.retriever\` (kb.* 노드 없음)
-- ❌ **절대 금지**: 함수명처럼 생긴 노드 타입 (예: retrieve_relevant_laws, analyze_additions, extract_data)
-- ❌ 위 Available Nodes 카탈로그에 없는 노드 타입은 생성 불가
+**🚨 카테고리 없는 짧은 노드명 금지 (가장 흔한 실수!):**
+- ❌ \`retriever\` → ✅ \`rag.retriever\`
+- ❌ \`preprocess\` → ✅ \`data.preprocess\`
+- ❌ \`analyze\` → ✅ \`ai.llm-invoke\`
+- ❌ \`llm\` → ✅ \`ai.llm-invoke\`
+- ❌ \`ocr\` → ✅ \`vision.ocr\`
+- ❌ \`result\` → ✅ \`viz.result-viewer\`
+- ❌ \`result_viewer\` → ✅ \`viz.result-viewer\`
+- ❌ \`node_1\`, \`node_2\`, \`5\` 등 숫자/일반명 → 정확한 노드 타입 사용
+
+**🚨 함수명 패턴 금지:**
+- ❌ \`extract_*\`, \`analyze_*\`, \`process_*\`, \`get_*\`, \`search_*\`, \`preprocess_*\`, \`postprocess_*\`, \`text_*\`, \`context_*\`
+- ❌ \`preprocess_text\`, \`analyze_with_llm\`, \`postprocess_data\`, \`text_merger\`, \`context_retriever\`, \`analyze_meetings\`, \`analyze_minutes\`
+- ❌ 위 패턴은 모두 함수명이며 노드 타입이 아님!
+
+⚠️ **중요: 노드 타입은 반드시 "카테고리.이름" 형식!**
+- ✅ 올바른 예: \`io.local-file\`, \`ai.llm-invoke\`, \`viz.result-viewer\`, \`rag.retriever\`, \`data.preprocess\`
+- ❌ 틀린 예: \`retriever\`, \`llm\`, \`preprocess\`, \`ocr\` (카테고리 없음!)
+- ❌ 절대 금지: 숫자(\`5\`), 일반명(\`node_2\`), 함수명(\`analyze_data\`)
+- **점(.)이 없으면 잘못된 노드 타입입니다!**
 
 ⚠️ **시작 노드 연결 금지**: 다음 노드들은 입력이 없으므로 다른 노드에서 연결할 수 없습니다:
 - \`io.local-folder\`, \`io.local-file\`, \`data.file-loader\` - 시작 노드끼리 연결 불가
@@ -1417,7 +1426,16 @@ class IntegratedWorkflowAgentImpl {
 - \`prompt.few-shot\` - 반드시 텍스트 입력(\`variable.input\` 또는 다른 노드 출력)에서 연결 필요
 - \`ai.llm-invoke\` - 반드시 프롬프트 입력이 필요
 - \`rag.retriever\` - 반드시 쿼리 텍스트 입력이 필요
+- \`storage.local\` - 반드시 저장할 데이터 입력 필요
 - ❌ 모든 처리 노드는 입력 없이 사용 불가!
+
+⚠️ **연결 불가 조합:**
+- ❌ \`control.conditional\` → \`convert.doc-parser\` (조건 분기 출력은 분기 대상 노드로만 연결)
+- ❌ \`control.conditional\` → \`data.preprocess\` (조건 분기 출력은 분기 대상 노드로만 연결)
+- ❌ \`control.conditional\` → \`viz.chart\` (조건 분기 출력은 분기 대상 노드로만 연결)
+- ❌ \`ai.embedding\` → \`data.preprocess\` (임베딩 출력은 벡터 타입, 전처리는 텍스트 입력)
+- ❌ \`export.excel\` → \`api.http-request\` (엑셀 출력은 파일, HTTP는 URL 입력)
+- ❌ \`rag.retriever\` → \`rag.retriever\` (자기 자신에게 연결 불가)
 
 ## MCP 도구 (확장)
 ${toolList}
