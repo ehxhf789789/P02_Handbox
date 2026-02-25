@@ -2,6 +2,7 @@
 
 pub mod compiler;
 pub mod execution;
+pub mod llm;
 pub mod pack;
 pub mod project;
 pub mod tool;

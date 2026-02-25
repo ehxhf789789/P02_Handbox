@@ -20,6 +20,7 @@ fn main() {
     }
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             // Workflow CRUD
@@ -29,6 +30,7 @@ fn main() {
             commands::workflow::update_workflow,
             commands::workflow::delete_workflow,
             commands::workflow::import_workflow,
+            commands::workflow::export_workflow_file,
             // Execution
             commands::execution::execute_workflow,
             commands::execution::get_execution_status,
@@ -52,6 +54,18 @@ fn main() {
             commands::pack::install_pack,
             // Compiler
             commands::compiler::compile_prompt,
+            // LLM
+            commands::llm::set_bedrock_credentials,
+            commands::llm::set_bedrock_region,
+            commands::llm::set_openai_api_key,
+            commands::llm::set_anthropic_api_key,
+            commands::llm::clear_llm_credentials,
+            commands::llm::set_local_llm_endpoint,
+            commands::llm::test_llm_connection,
+            commands::llm::list_llm_models,
+            commands::llm::invoke_llm,
+            commands::llm::create_embedding,
+            commands::llm::get_credential_status,
         ])
         .run(tauri::generate_context!())
         .expect("error running Handbox");

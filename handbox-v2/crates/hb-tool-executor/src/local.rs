@@ -19,6 +19,7 @@ pub async fn execute_native(input: &ToolInput) -> Result<ToolOutput, ExecutorErr
 
     let outputs = match tool_name {
         "file-read" => execute_file_read(input)?,
+        "pdf-read" => execute_pdf_read(input)?,
         "file-write" => execute_file_write(input)?,
         "text-split" => execute_text_split(input)?,
         "text-merge" => execute_text_merge(input)?,
@@ -31,12 +32,25 @@ pub async fn execute_native(input: &ToolInput) -> Result<ToolOutput, ExecutorErr
         "merge" => execute_merge(input)?,
         "delay" => execute_delay(input).await?,
         "display-output" => {
-            serde_json::json!({ "displayed": true })
+            // Pass through any data input
+            let data = input.inputs.get("data").cloned().unwrap_or(serde_json::json!(null));
+            serde_json::json!({ "displayed": true, "data": data })
         }
         "user-input" => {
-            serde_json::json!({ "text": "" })
+            // In automated execution, use config value or empty
+            let text = input.config.get("default_value")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            serde_json::json!({ "text": text })
         }
         "condition" => execute_condition(input)?,
+        // LLM tools
+        "llm-chat" => execute_llm_chat(input).await?,
+        "llm-summarize" => execute_llm_summarize(input).await?,
+        "embedding" => execute_embedding(input).await?,
+        "vector-store" => execute_vector_store(input)?,
+        "vector-search" => execute_vector_search(input)?,
         _ => {
             // Unknown native tools return a stub
             serde_json::json!({
@@ -107,17 +121,110 @@ pub async fn execute_process(
 // ---- Native tool implementations ----
 
 fn execute_file_read(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
+    // Get path from inputs first, then fall back to config file_path
     let path = input
         .inputs
         .get("path")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| ExecutorError::ExecutionFailed("Missing 'path' input".into()))?;
+        .or_else(|| input.config.get("file_path").and_then(|v| v.as_str()))
+        .ok_or_else(|| ExecutorError::ExecutionFailed("Missing 'path' input or 'file_path' config".into()))?;
+
+    // Skip if path is empty
+    if path.trim().is_empty() {
+        return Err(ExecutorError::ExecutionFailed("File path is empty. Please configure the file path.".into()));
+    }
+
+    // Auto-detect PDF files and use PDF extractor
+    if path.to_lowercase().ends_with(".pdf") {
+        return execute_pdf_read(input);
+    }
 
     let content = std::fs::read_to_string(path)
         .map_err(|e| ExecutorError::ExecutionFailed(format!("Failed to read {path}: {e}")))?;
     let size = content.len();
 
     Ok(serde_json::json!({ "content": content, "size": size }))
+}
+
+fn execute_pdf_read(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
+    use std::panic;
+
+    // Get path from inputs first, then fall back to config file_path
+    let path = input
+        .inputs
+        .get("path")
+        .and_then(|v| v.as_str())
+        .or_else(|| input.config.get("file_path").and_then(|v| v.as_str()))
+        .ok_or_else(|| ExecutorError::ExecutionFailed("Missing 'path' input or 'file_path' config".into()))?;
+
+    // Skip if path is empty
+    if path.trim().is_empty() {
+        return Err(ExecutorError::ExecutionFailed("PDF file path is empty. Please configure the file path.".into()));
+    }
+
+    // Check file exists
+    if !std::path::Path::new(path).exists() {
+        return Err(ExecutorError::ExecutionFailed(format!("PDF file not found: {path}")));
+    }
+
+    // Read PDF bytes
+    let bytes = std::fs::read(path)
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("Failed to read PDF file {path}: {e}")))?;
+
+    // Extract text from PDF with panic catching (pdf-extract can panic on some fonts)
+    let bytes_clone = bytes.clone();
+    let extraction_result = panic::catch_unwind(|| {
+        pdf_extract::extract_text_from_mem(&bytes_clone)
+    });
+
+    let content = match extraction_result {
+        Ok(Ok(text)) => text,
+        Ok(Err(e)) => {
+            return Err(ExecutorError::ExecutionFailed(format!(
+                "Failed to extract text from PDF: {e}"
+            )));
+        }
+        Err(_) => {
+            // Panic occurred - try lopdf as fallback for basic text extraction
+            tracing::warn!("pdf-extract panicked, falling back to basic extraction");
+            extract_pdf_text_basic(&bytes)?
+        }
+    };
+
+    // Count pages (rough estimate based on page breaks or form feeds)
+    let pages = content.matches('\x0c').count().max(1);
+
+    Ok(serde_json::json!({
+        "content": content,
+        "pages": pages,
+        "size": bytes.len()
+    }))
+}
+
+/// Basic PDF text extraction fallback using lopdf directly
+fn extract_pdf_text_basic(bytes: &[u8]) -> Result<String, ExecutorError> {
+    use std::io::Cursor;
+
+    let doc = lopdf::Document::load_from(Cursor::new(bytes))
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("Failed to parse PDF: {e}")))?;
+
+    let mut text = String::new();
+    let pages = doc.get_pages();
+
+    for (page_num, _) in pages.iter() {
+        if let Ok(page_text) = doc.extract_text(&[*page_num]) {
+            text.push_str(&page_text);
+            text.push('\x0c'); // page break
+        }
+    }
+
+    if text.is_empty() {
+        return Err(ExecutorError::ExecutionFailed(
+            "Could not extract text from PDF. The PDF may contain images or unsupported fonts.".into()
+        ));
+    }
+
+    Ok(text)
 }
 
 fn execute_file_write(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
@@ -263,11 +370,17 @@ fn execute_json_path(input: &ToolInput) -> Result<serde_json::Value, ExecutorErr
 }
 
 fn execute_csv_read(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
+    // Get path from inputs first, then fall back to config file_path
     let path = input
         .inputs
         .get("path")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| ExecutorError::ExecutionFailed("Missing 'path' input".into()))?;
+        .or_else(|| input.config.get("file_path").and_then(|v| v.as_str()))
+        .ok_or_else(|| ExecutorError::ExecutionFailed("Missing 'path' input or 'file_path' config".into()))?;
+
+    if path.trim().is_empty() {
+        return Err(ExecutorError::ExecutionFailed("File path is empty. Please configure the file path.".into()));
+    }
 
     let content = std::fs::read_to_string(path)
         .map_err(|e| ExecutorError::ExecutionFailed(format!("Failed to read {path}: {e}")))?;
@@ -420,4 +533,466 @@ async fn execute_delay(input: &ToolInput) -> Result<serde_json::Value, ExecutorE
 
     let pass_through = input.inputs.get("input").cloned().unwrap_or(serde_json::json!(null));
     Ok(serde_json::json!({ "output": pass_through }))
+}
+
+// ---- LLM Tool Implementations ----
+
+async fn execute_llm_chat(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
+    let prompt = input
+        .inputs
+        .get("prompt")
+        .and_then(|v| v.as_str())
+        .or_else(|| input.inputs.get("text").and_then(|v| v.as_str()))
+        .unwrap_or("");
+
+    let context = input
+        .inputs
+        .get("context")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let system_prompt = input
+        .config
+        .get("system_prompt")
+        .and_then(|v| v.as_str())
+        .unwrap_or("You are a helpful assistant.");
+
+    let model = input
+        .config
+        .get("model")
+        .and_then(|v| v.as_str())
+        .unwrap_or("claude-3-haiku-20240307");
+
+    let max_tokens = input
+        .config
+        .get("max_tokens")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(4096) as i32;
+
+    let temperature = input
+        .config
+        .get("temperature")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.7) as f32;
+
+    // Build the full prompt with context if available
+    let full_prompt = if context.is_empty() {
+        prompt.to_string()
+    } else {
+        format!("Context:\n{context}\n\nQuestion/Task:\n{prompt}")
+    };
+
+    // Try providers in order: Anthropic, OpenAI, Bedrock, Local
+    if let Ok(api_key) = std::env::var("ANTHROPIC_API_KEY") {
+        return call_anthropic_api(&api_key, model, &full_prompt, system_prompt, max_tokens, temperature).await;
+    }
+
+    if let Ok(api_key) = std::env::var("OPENAI_API_KEY") {
+        let openai_model = if model.contains("claude") { "gpt-4o" } else { model };
+        return call_openai_api(&api_key, openai_model, &full_prompt, system_prompt, max_tokens, temperature).await;
+    }
+
+    if let Ok(api_key) = std::env::var("BEDROCK_API_KEY") {
+        let region = std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string());
+        return call_bedrock_api(&api_key, &region, model, &full_prompt, system_prompt, max_tokens, temperature).await;
+    }
+
+    if let Ok(endpoint) = std::env::var("LOCAL_LLM_ENDPOINT") {
+        return call_local_llm_api(&endpoint, model, &full_prompt, system_prompt, max_tokens, temperature).await;
+    }
+
+    Err(ExecutorError::ExecutionFailed(
+        "No LLM API key configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, BEDROCK_API_KEY, or LOCAL_LLM_ENDPOINT.".into()
+    ))
+}
+
+async fn execute_llm_summarize(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
+    let text = input
+        .inputs
+        .get("text")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let style = input
+        .config
+        .get("style")
+        .and_then(|v| v.as_str())
+        .unwrap_or("concise");
+
+    let system_prompt = format!(
+        "You are a summarization expert. Create a {} summary of the given text. \
+        Focus on the key points and main ideas.",
+        style
+    );
+
+    let summary_prompt = format!("Please summarize the following text:\n\n{text}");
+
+    // Reuse llm-chat with summarization prompt
+    let modified_input = ToolInput {
+        tool_ref: input.tool_ref.clone(),
+        inputs: serde_json::json!({ "prompt": summary_prompt }),
+        config: serde_json::json!({
+            "system_prompt": system_prompt,
+            "model": input.config.get("model").cloned().unwrap_or(serde_json::json!("claude-3-haiku-20240307")),
+            "max_tokens": input.config.get("max_tokens").cloned().unwrap_or(serde_json::json!(2048)),
+            "temperature": 0.3
+        }),
+    };
+
+    let result = execute_llm_chat(&modified_input).await?;
+    let summary = result.get("response").and_then(|v| v.as_str()).unwrap_or("");
+
+    Ok(serde_json::json!({ "summary": summary }))
+}
+
+async fn execute_embedding(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
+    let text = input
+        .inputs
+        .get("text")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    // Try OpenAI embeddings first, then Bedrock
+    if let Ok(api_key) = std::env::var("OPENAI_API_KEY") {
+        return call_openai_embedding(&api_key, text).await;
+    }
+
+    if let Ok(api_key) = std::env::var("BEDROCK_API_KEY") {
+        let region = std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string());
+        return call_bedrock_embedding(&api_key, &region, text).await;
+    }
+
+    // Fallback: generate a simple hash-based "embedding" for testing
+    let hash = simple_hash_embedding(text);
+    Ok(serde_json::json!({
+        "vector": hash,
+        "dimension": hash.len(),
+        "stub": true
+    }))
+}
+
+fn execute_vector_store(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
+    // Simple in-memory vector storage simulation
+    let vectors = input.inputs.get("vectors").cloned().unwrap_or(serde_json::json!([]));
+    let chunks = input.inputs.get("chunks").cloned().unwrap_or(serde_json::json!([]));
+
+    let count = vectors.as_array().map(|a| a.len()).unwrap_or(0);
+
+    Ok(serde_json::json!({
+        "index_id": format!("idx_{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("0")),
+        "stored_count": count,
+        "vectors": vectors,
+        "chunks": chunks
+    }))
+}
+
+fn execute_vector_search(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
+    // Simple similarity search simulation
+    let _query_vector = input.inputs.get("query_vector").cloned().unwrap_or(serde_json::json!([]));
+    let top_k = input.config.get("top_k").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
+
+    // Return empty results for now - real implementation would use vector DB
+    Ok(serde_json::json!({
+        "results": [],
+        "count": 0,
+        "top_k": top_k
+    }))
+}
+
+// ---- LLM API Helpers ----
+
+async fn call_anthropic_api(
+    api_key: &str,
+    model: &str,
+    prompt: &str,
+    system_prompt: &str,
+    max_tokens: i32,
+    temperature: f32,
+) -> Result<serde_json::Value, ExecutorError> {
+    let body = serde_json::json!({
+        "model": model,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "system": system_prompt,
+        "messages": [{"role": "user", "content": prompt}]
+    });
+
+    let client = reqwest::Client::new();
+    let response = client
+        .post("https://api.anthropic.com/v1/messages")
+        .header("x-api-key", api_key)
+        .header("anthropic-version", "2023-06-01")
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("Anthropic request failed: {e}")))?;
+
+    if !response.status().is_success() {
+        let error_body = response.text().await.unwrap_or_default();
+        return Err(ExecutorError::ExecutionFailed(format!("Anthropic API error: {error_body}")));
+    }
+
+    let result: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("Response parse failed: {e}")))?;
+
+    let text = result["content"][0]["text"].as_str().unwrap_or("").to_string();
+
+    Ok(serde_json::json!({
+        "response": text,
+        "model": model,
+        "input_tokens": result["usage"]["input_tokens"].as_i64().unwrap_or(0),
+        "output_tokens": result["usage"]["output_tokens"].as_i64().unwrap_or(0)
+    }))
+}
+
+async fn call_openai_api(
+    api_key: &str,
+    model: &str,
+    prompt: &str,
+    system_prompt: &str,
+    max_tokens: i32,
+    temperature: f32,
+) -> Result<serde_json::Value, ExecutorError> {
+    let body = serde_json::json!({
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt}
+        ],
+        "max_tokens": max_tokens,
+        "temperature": temperature
+    });
+
+    let client = reqwest::Client::new();
+    let response = client
+        .post("https://api.openai.com/v1/chat/completions")
+        .header("Authorization", format!("Bearer {api_key}"))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("OpenAI request failed: {e}")))?;
+
+    if !response.status().is_success() {
+        let error_body = response.text().await.unwrap_or_default();
+        return Err(ExecutorError::ExecutionFailed(format!("OpenAI API error: {error_body}")));
+    }
+
+    let result: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("Response parse failed: {e}")))?;
+
+    let text = result["choices"][0]["message"]["content"].as_str().unwrap_or("").to_string();
+
+    Ok(serde_json::json!({
+        "response": text,
+        "model": model,
+        "input_tokens": result["usage"]["prompt_tokens"].as_i64().unwrap_or(0),
+        "output_tokens": result["usage"]["completion_tokens"].as_i64().unwrap_or(0)
+    }))
+}
+
+async fn call_bedrock_api(
+    api_key: &str,
+    region: &str,
+    model: &str,
+    prompt: &str,
+    system_prompt: &str,
+    max_tokens: i32,
+    temperature: f32,
+) -> Result<serde_json::Value, ExecutorError> {
+    let model_id = if model.starts_with("anthropic.") {
+        model.to_string()
+    } else {
+        format!("anthropic.{}", model.replace("claude-", "claude-"))
+    };
+
+    let body = serde_json::json!({
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "system": system_prompt,
+        "messages": [{"role": "user", "content": prompt}]
+    });
+
+    let url = format!(
+        "https://bedrock-runtime.{}.amazonaws.com/model/{}/invoke",
+        region, model_id
+    );
+
+    let client = reqwest::Client::new();
+    let response = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {api_key}"))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("Bedrock request failed: {e}")))?;
+
+    if !response.status().is_success() {
+        let error_body = response.text().await.unwrap_or_default();
+        return Err(ExecutorError::ExecutionFailed(format!("Bedrock API error: {error_body}")));
+    }
+
+    let result: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("Response parse failed: {e}")))?;
+
+    let text = result["content"][0]["text"].as_str().unwrap_or("").to_string();
+
+    Ok(serde_json::json!({
+        "response": text,
+        "model": model_id,
+        "input_tokens": result["usage"]["input_tokens"].as_i64().unwrap_or(0),
+        "output_tokens": result["usage"]["output_tokens"].as_i64().unwrap_or(0)
+    }))
+}
+
+async fn call_local_llm_api(
+    endpoint: &str,
+    model: &str,
+    prompt: &str,
+    system_prompt: &str,
+    max_tokens: i32,
+    temperature: f32,
+) -> Result<serde_json::Value, ExecutorError> {
+    let url = format!("{}/api/generate", endpoint.trim_end_matches('/'));
+
+    let body = serde_json::json!({
+        "model": model,
+        "prompt": prompt,
+        "system": system_prompt,
+        "stream": false,
+        "options": {
+            "num_predict": max_tokens,
+            "temperature": temperature
+        }
+    });
+
+    let client = reqwest::Client::new();
+    let response = client
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("Local LLM request failed: {e}")))?;
+
+    if !response.status().is_success() {
+        let error_body = response.text().await.unwrap_or_default();
+        return Err(ExecutorError::ExecutionFailed(format!("Local LLM error: {error_body}")));
+    }
+
+    let result: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("Response parse failed: {e}")))?;
+
+    let text = result["response"].as_str().unwrap_or("").to_string();
+
+    Ok(serde_json::json!({
+        "response": text,
+        "model": model,
+        "input_tokens": result["prompt_eval_count"].as_i64().unwrap_or(0),
+        "output_tokens": result["eval_count"].as_i64().unwrap_or(0)
+    }))
+}
+
+async fn call_openai_embedding(api_key: &str, text: &str) -> Result<serde_json::Value, ExecutorError> {
+    let body = serde_json::json!({
+        "model": "text-embedding-3-small",
+        "input": text
+    });
+
+    let client = reqwest::Client::new();
+    let response = client
+        .post("https://api.openai.com/v1/embeddings")
+        .header("Authorization", format!("Bearer {api_key}"))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("OpenAI embedding request failed: {e}")))?;
+
+    if !response.status().is_success() {
+        let error_body = response.text().await.unwrap_or_default();
+        return Err(ExecutorError::ExecutionFailed(format!("OpenAI embedding error: {error_body}")));
+    }
+
+    let result: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("Response parse failed: {e}")))?;
+
+    let embedding: Vec<f64> = result["data"][0]["embedding"]
+        .as_array()
+        .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect())
+        .unwrap_or_default();
+
+    Ok(serde_json::json!({
+        "vector": embedding,
+        "dimension": embedding.len()
+    }))
+}
+
+async fn call_bedrock_embedding(api_key: &str, region: &str, text: &str) -> Result<serde_json::Value, ExecutorError> {
+    let model_id = "amazon.titan-embed-text-v1";
+    let url = format!(
+        "https://bedrock-runtime.{}.amazonaws.com/model/{}/invoke",
+        region, model_id
+    );
+
+    let body = serde_json::json!({ "inputText": text });
+
+    let client = reqwest::Client::new();
+    let response = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {api_key}"))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("Bedrock embedding request failed: {e}")))?;
+
+    if !response.status().is_success() {
+        let error_body = response.text().await.unwrap_or_default();
+        return Err(ExecutorError::ExecutionFailed(format!("Bedrock embedding error: {error_body}")));
+    }
+
+    let result: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("Response parse failed: {e}")))?;
+
+    let embedding: Vec<f64> = result["embedding"]
+        .as_array()
+        .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect())
+        .unwrap_or_default();
+
+    Ok(serde_json::json!({
+        "vector": embedding,
+        "dimension": embedding.len()
+    }))
+}
+
+/// Simple hash-based embedding for testing (not a real embedding)
+fn simple_hash_embedding(text: &str) -> Vec<f64> {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut embeddings = Vec::with_capacity(128);
+    for i in 0..128 {
+        let mut hasher = DefaultHasher::new();
+        text.hash(&mut hasher);
+        i.hash(&mut hasher);
+        let hash = hasher.finish();
+        embeddings.push((hash as f64 / u64::MAX as f64) * 2.0 - 1.0);
+    }
+    embeddings
 }
