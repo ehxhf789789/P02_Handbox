@@ -102,3 +102,12 @@ export interface SubWorkflowConfig {
   /** 변수 오버라이드 */
   variableOverrides?: Record<string, any>
 }
+
+// ============================================================
+// 레거시 호환 별칭
+// ============================================================
+
+/** @deprecated SerializedNode 사용 권장 */
+export type WorkflowNode = SerializedNode
+/** @deprecated SerializedEdge 사용 권장 */
+export type WorkflowEdge = SerializedEdge

@@ -19,6 +19,7 @@ import { invoke } from '@tauri-apps/api/tauri'
 import { LocalMCPRegistry } from './LocalMCPRegistry'
 import { LocalLLMProvider, configureOllama } from './LocalLLMProvider'
 import { ProviderRegistry } from '../registry/ProviderRegistry'
+import { ToolRegistry } from '../registry/ToolRegistry'
 import { Guardrails } from './Guardrails'
 import { useAppStore } from '../stores/appStore'
 import { InteractiveXAI, startXAISession, recordNodeDecision, type XAISession } from './InteractiveXAI'
@@ -959,141 +960,85 @@ export interface AgentSession {
 // MCP Tool Knowledge Base
 // ============================================================
 
-const MCP_TOOL_KNOWLEDGE = {
-  // 기본 도구
-  text_transform: {
-    category: '텍스트 처리',
-    useCases: ['대소문자 변환', 'Base64 인코딩/디코딩', 'URL 인코딩/디코딩', '문자열 정규화'],
-    bestFor: '텍스트 전처리, 데이터 정규화, 포맷 변환',
-    commonPairs: ['json_process', 'data_transform'],
-  },
-  json_process: {
-    category: '데이터 처리',
-    useCases: ['JSON 파싱', 'JSONPath 쿼리', 'JSON 포맷팅', '스키마 검증'],
-    bestFor: 'API 응답 처리, 데이터 추출, 구조 변환',
-    commonPairs: ['http_request', 'data_transform'],
-  },
-  math_calculate: {
-    category: '계산/분석',
-    useCases: ['수식 계산', '통계 분석', '단위 변환', '백분율 계산'],
-    bestFor: '데이터 분석, 수치 처리, 통계 산출',
-    commonPairs: ['chart_generate', 'data_transform'],
-  },
-  datetime: {
-    category: '시간 처리',
-    useCases: ['현재 시간', '날짜 포맷 변환', '날짜 계산', '타임존 변환'],
-    bestFor: '일정 관리, 타임스탬프 처리, 기간 계산',
-    commonPairs: ['text_transform'],
-  },
-  chart_generate: {
-    category: '시각화',
-    useCases: ['바 차트', '라인 차트', '파이 차트', '데이터 시각화'],
-    bestFor: '보고서 생성, 데이터 시각화, 대시보드',
-    commonPairs: ['math_calculate', 'data_transform'],
-  },
-  http_request: {
-    category: '외부 연동',
-    useCases: ['API 호출', '웹 데이터 가져오기', 'REST 요청'],
-    bestFor: '외부 서비스 연동, 데이터 수집, API 통합',
-    commonPairs: ['json_process', 'data_transform'],
-  },
-  regex: {
-    category: '패턴 처리',
-    useCases: ['패턴 매칭', '텍스트 추출', '치환', '분할'],
-    bestFor: '데이터 검증, 정보 추출, 텍스트 정제',
-    commonPairs: ['text_transform', 'data_transform'],
-  },
-  crypto_utils: {
-    category: '보안/암호화',
-    useCases: ['UUID 생성', '해시 계산', '랜덤 문자열', 'HMAC'],
-    bestFor: '보안 처리, 고유 ID 생성, 데이터 무결성',
-    commonPairs: ['text_transform'],
-  },
-  data_transform: {
-    category: '데이터 변환',
-    useCases: ['CSV→JSON', 'JSON→마크다운', 'XML 변환', '포맷 변환'],
-    bestFor: '데이터 포맷 변환, 보고서 생성, 데이터 이관',
-    commonPairs: ['json_process', 'chart_generate'],
-  },
+/**
+ * ToolRegistry에서 동적으로 도구 정보를 생성합니다.
+ * 기존의 정적 MCP_TOOL_KNOWLEDGE를 대체합니다.
+ */
+function getToolKnowledge(): Record<string, {
+  category: string
+  useCases: string[]
+  bestFor: string
+  commonPairs: string[]
+}> {
+  const tools = ToolRegistry.getAll()
+  const result: Record<string, any> = {}
 
-  // 고급 도구 (RAG)
-  rag_ingest: {
-    category: 'RAG',
-    useCases: ['문서 인제스트', '지식베이스 구축', '임베딩 생성'],
-    bestFor: '문서 기반 Q&A 시스템, 지식 관리, 검색 시스템',
-    commonPairs: ['rag_query', 'rag_generate', 'kb_create'],
-  },
-  rag_query: {
-    category: 'RAG',
-    useCases: ['시맨틱 검색', '문서 검색', '유사 문서 찾기'],
-    bestFor: '지식 검색, 관련 문서 찾기, 컨텍스트 수집',
-    commonPairs: ['rag_ingest', 'rag_generate'],
-  },
-  rag_generate: {
-    category: 'RAG',
-    useCases: ['RAG 기반 응답', '문서 기반 답변', '출처 포함 생성'],
-    bestFor: '문서 기반 Q&A, 컨텍스트 인식 응답, 지식 활용',
-    commonPairs: ['rag_query', 'rag_ingest'],
-  },
+  // 카테고리별 공통 페어 정의
+  const categoryPairs: Record<string, string[]> = {
+    file: ['text', 'json', 'doc'],
+    text: ['json', 'llm', 'export'],
+    json: ['text', 'http', 'viz'],
+    csv: ['json', 'viz', 'export'],
+    xml: ['json', 'text', 'http'],
+    http: ['json', 'storage', 'llm'],
+    storage: ['file', 'rag', 'llm'],
+    doc: ['text', 'rag', 'llm'],
+    llm: ['prompt', 'rag', 'agent'],
+    prompt: ['llm', 'rag', 'agent'],
+    rag: ['llm', 'doc', 'storage'],
+    vision: ['llm', 'doc', 'export'],
+    agent: ['llm', 'prompt', 'rag'],
+    control: ['llm', 'agent', 'viz'],
+    variable: ['control', 'llm', 'viz'],
+    viz: ['json', 'llm', 'export'],
+    export: ['viz', 'doc', 'llm'],
+  }
 
-  // 고급 도구 (S3)
-  s3_upload: {
-    category: 'AWS S3',
-    useCases: ['파일 업로드', '백업', '클라우드 저장'],
-    bestFor: '데이터 백업, 파일 공유, 클라우드 저장소',
-    commonPairs: ['s3_download', 's3_list', 'rag_ingest'],
-  },
-  s3_download: {
-    category: 'AWS S3',
-    useCases: ['파일 다운로드', '데이터 가져오기'],
-    bestFor: '클라우드 데이터 활용, 파일 복원',
-    commonPairs: ['s3_list', 'rag_ingest'],
-  },
-  s3_list: {
-    category: 'AWS S3',
-    useCases: ['버킷 탐색', '파일 목록', '폴더 구조'],
-    bestFor: '데이터 탐색, 파일 관리, 인벤토리',
-    commonPairs: ['s3_download', 's3_upload'],
-  },
+  for (const tool of tools) {
+    const cat = tool.meta.category
+    const catDef = ToolRegistry.getCategory(cat as any)
+    const catLabel = catDef?.label || cat
 
-  // 고급 도구 (KB)
-  kb_create: {
-    category: '지식베이스',
-    useCases: ['지식베이스 생성', 'KB 설정'],
-    bestFor: 'RAG 시스템 구축, 문서 관리 시스템',
-    commonPairs: ['rag_ingest', 'kb_list'],
-  },
-  kb_list: {
-    category: '지식베이스',
-    useCases: ['KB 목록', '상태 확인'],
-    bestFor: 'KB 관리, 모니터링',
-    commonPairs: ['kb_create', 'rag_query'],
-  },
+    // 태그에서 use cases 추출
+    const useCases = tool.meta.tags.slice(0, 4)
 
-  // 고급 도구 (에이전트)
-  agent_invoke: {
-    category: 'AI 에이전트',
-    useCases: ['에이전트 호출', '멀티스텝 처리', '자동화'],
-    bestFor: '복잡한 작업 자동화, 다단계 처리',
-    commonPairs: ['rag_generate', 'http_request'],
-  },
+    // 같은 카테고리의 관련 도구 찾기
+    const sameCategory = tools
+      .filter(t => t.meta.category === cat && t.name !== tool.name)
+      .slice(0, 2)
+      .map(t => t.name)
 
-  // 고급 도구 (비전)
-  vision_analyze: {
-    category: '비전/멀티모달',
-    useCases: ['이미지 분석', 'OCR', '문서 이해', '차트 분석'],
-    bestFor: '이미지 처리, 문서 디지털화, 시각 데이터 분석',
-    commonPairs: ['data_transform', 'rag_ingest', 'image_generate'],
-  },
+    // 다른 카테고리와의 공통 페어
+    const pairs = categoryPairs[cat] || []
+    const crossPairs = pairs.flatMap(pairCat =>
+      tools.filter(t => t.meta.category === pairCat).slice(0, 1).map(t => t.name)
+    )
 
-  // 고급 도구 (이미지 생성)
-  image_generate: {
-    category: '이미지 생성',
-    useCases: ['텍스트→이미지', 'AI 아트', '일러스트 생성', '컨셉 아트'],
-    bestFor: '이미지 생성, 시각 콘텐츠 제작, 디자인 프로토타입',
-    commonPairs: ['vision_analyze', 'data_transform'],
-  },
+    result[tool.name] = {
+      category: catLabel,
+      useCases,
+      bestFor: tool.description,
+      commonPairs: [...sameCategory, ...crossPairs].slice(0, 4),
+    }
+  }
+
+  return result
 }
+
+// 캐싱된 도구 지식 (성능 최적화)
+let _cachedToolKnowledge: ReturnType<typeof getToolKnowledge> | null = null
+
+function getCachedToolKnowledge() {
+  if (!_cachedToolKnowledge) {
+    _cachedToolKnowledge = getToolKnowledge()
+  }
+  return _cachedToolKnowledge
+}
+
+// 도구 등록 변경 시 캐시 무효화
+ToolRegistry.onChange(() => {
+  _cachedToolKnowledge = null
+})
 
 // ============================================================
 // Workflow Templates
@@ -1248,8 +1193,9 @@ class IntegratedWorkflowAgentImpl {
    * 시스템 프롬프트 생성 - 동적으로 등록된 노드 정보 포함
    */
   private buildSystemPrompt(): string {
-    // MCP 도구 목록
-    const toolList = Object.entries(MCP_TOOL_KNOWLEDGE)
+    // MCP 도구 목록 (ToolRegistry에서 동적 생성)
+    const toolKnowledge = getCachedToolKnowledge()
+    const toolList = Object.entries(toolKnowledge)
       .map(([name, info]) => `- **${name}** (${info.category}): ${info.bestFor}`)
       .join('\n')
 
@@ -3129,8 +3075,9 @@ ${currentWorkflowJson}
     const intent = this.analyzeIntent(task)
     const explanations: Record<string, string> = {}
 
+    const toolKnowledge = getCachedToolKnowledge()
     for (const tool of intent.suggestedTools) {
-      const info = MCP_TOOL_KNOWLEDGE[tool as keyof typeof MCP_TOOL_KNOWLEDGE]
+      const info = toolKnowledge[tool]
       if (info) {
         explanations[tool] = `${info.category} - ${info.bestFor}`
       }

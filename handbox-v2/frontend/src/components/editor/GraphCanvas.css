@@ -1,0 +1,59 @@
+/**
+ * GraphCanvas custom styles for React Flow controls
+ */
+
+/* Make Controls (zoom buttons) more visible */
+.react-flow__controls {
+  background: #1a1a1a !important;
+  border: 1px solid #404040 !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5) !important;
+  padding: 4px !important;
+}
+
+.react-flow__controls-button {
+  background: #262626 !important;
+  border: 1px solid #404040 !important;
+  border-radius: 4px !important;
+  width: 28px !important;
+  height: 28px !important;
+  margin: 2px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+}
+
+.react-flow__controls-button:hover {
+  background: #3a3a3a !important;
+  border-color: #525252 !important;
+}
+
+.react-flow__controls-button svg {
+  fill: #a3a3a3 !important;
+  width: 14px !important;
+  height: 14px !important;
+}
+
+.react-flow__controls-button:hover svg {
+  fill: #e5e5e5 !important;
+}
+
+/* MiniMap improvements */
+.react-flow__minimap {
+  background: #141414 !important;
+  border: 1px solid #404040 !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* Remove default selection highlight - we handle it in the node component */
+.react-flow__node.selected {
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+.react-flow__node:focus {
+  outline: none !important;
+}

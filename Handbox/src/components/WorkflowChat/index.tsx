@@ -124,8 +124,8 @@ function WorkflowChat() {
             id: e.id || `e_${e.source}_${e.target}`,
             source: e.source,
             target: e.target,
-            sourceHandle: 'output',
-            targetHandle: 'input',
+            sourceHandle: null,
+            targetHandle: null,
           })),
         })
 

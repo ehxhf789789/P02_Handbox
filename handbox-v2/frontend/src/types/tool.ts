@@ -85,3 +85,39 @@ export interface ConfigOption {
   label: string
   value: unknown
 }
+
+// ============================================================================
+// Simplified ToolDefinition for UI catalogs
+// ============================================================================
+
+/**
+ * ToolDefinition for workflow node catalogs (GIS, IFC, Fusion, etc.)
+ */
+export interface ToolDefinition {
+  id: string
+  name: string
+  description: string
+  category: string
+  icon?: string
+  inputs: ToolPort[]
+  outputs: ToolPort[]
+  configFields?: ToolConfigField[]
+}
+
+export interface ToolPort {
+  name: string
+  type: string
+  required?: boolean
+  description?: string
+}
+
+export interface ToolConfigField {
+  name: string
+  label: string
+  type: 'string' | 'number' | 'boolean' | 'select' | 'multiselect' | 'file' | 'files' | 'folder'
+  defaultValue?: unknown
+  options?: { value: string; label: string }[]
+  description?: string
+  placeholder?: string
+  required?: boolean
+}

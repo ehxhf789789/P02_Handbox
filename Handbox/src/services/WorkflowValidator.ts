@@ -5,9 +5,58 @@
  */
 
 import { NodeRegistry } from '../registry/NodeRegistry'
+import { ToolRegistry } from '../registry/ToolRegistry'
 import type { NodeDefinition } from '../registry/NodeDefinition'
-import type { ConfigField } from '../engine/types'
+import type { UnifiedToolDefinition } from '../registry/UnifiedToolDefinition'
+import type { ConfigField, PortDefinition } from '../engine/types'
 import { areTypesCompatible } from '../utils/nodeDescriptionGenerator'
+
+// ============================================================
+// 통합 정의 조회 헬퍼
+// ============================================================
+
+interface NormalizedDefinition {
+  type: string
+  category: string
+  label: string
+  description: string
+  ports: { inputs: PortDefinition[]; outputs: PortDefinition[] }
+  configSchema: ConfigField[]
+}
+
+/**
+ * ToolRegistry 또는 NodeRegistry에서 정의를 조회합니다.
+ * ToolRegistry를 우선 조회하고, 없으면 NodeRegistry에서 조회합니다.
+ */
+function getDefinition(type: string): NormalizedDefinition | undefined {
+  // 1. ToolRegistry에서 조회
+  const toolDef = ToolRegistry.get(type)
+  if (toolDef) {
+    return {
+      type: toolDef.name,
+      category: toolDef.meta.category,
+      label: toolDef.meta.label,
+      description: toolDef.description,
+      ports: toolDef.ports as any,
+      configSchema: (toolDef.configSchema || []) as ConfigField[],
+    }
+  }
+
+  // 2. NodeRegistry에서 조회 (레거시 호환)
+  const nodeDef = NodeRegistry.get(type)
+  if (nodeDef) {
+    return {
+      type: nodeDef.type,
+      category: nodeDef.category,
+      label: nodeDef.meta.label,
+      description: nodeDef.meta.description,
+      ports: nodeDef.ports,
+      configSchema: nodeDef.configSchema,
+    }
+  }
+
+  return undefined
+}
 
 // ============================================================
 // 타입 정의
@@ -232,8 +281,8 @@ export function validateTypeCompatibility(
       continue
     }
 
-    const sourceDef = NodeRegistry.get(sourceNode.type)
-    const targetDef = NodeRegistry.get(targetNode.type)
+    const sourceDef = getDefinition(sourceNode.type)
+    const targetDef = getDefinition(targetNode.type)
 
     if (!sourceDef || !targetDef) {
       issues.push({
@@ -292,7 +341,7 @@ export function validateAndCompleteConfig(nodes: WorkflowNode[]): {
   const fixedNodes: WorkflowNode[] = []
 
   for (const node of nodes) {
-    const def = NodeRegistry.get(node.type)
+    const def = getDefinition(node.type)
     if (!def) continue
 
     let needsFix = false
@@ -365,8 +414,8 @@ export function insertTypeConverters(
       continue
     }
 
-    const sourceDef = NodeRegistry.get(sourceNode.type)
-    const targetDef = NodeRegistry.get(targetNode.type)
+    const sourceDef = getDefinition(sourceNode.type)
+    const targetDef = getDefinition(targetNode.type)
 
     if (!sourceDef || !targetDef) {
       newEdges.push(edge)
@@ -447,7 +496,7 @@ export function validateRequiredInputs(
   }
 
   for (const node of nodes) {
-    const def = NodeRegistry.get(node.type)
+    const def = getDefinition(node.type)
     if (!def) continue
 
     // 필수 입력 포트 확인
@@ -519,7 +568,7 @@ export function fixRequiredInputs(
   }
 
   for (const node of nodes) {
-    const def = NodeRegistry.get(node.type)
+    const def = getDefinition(node.type)
     if (!def) continue
 
     const requiredInputs = def.ports.inputs.filter(p => p.required)

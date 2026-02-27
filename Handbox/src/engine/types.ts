@@ -163,6 +163,8 @@ export interface NodeExecutionResult {
 export interface ExecutionContext {
   /** 워크플로우 실행 ID */
   executionId: string
+  /** 워크플로우 ID (선택, MCP 도구 연동용) */
+  workflowId?: string
   /** 각 노드의 출력 (nodeId → output) */
   nodeOutputs: Record<string, Record<string, any>>
   /** 워크플로우 수준 변수 */

@@ -17,6 +17,8 @@ pub async fn execute_native(input: &ToolInput) -> Result<ToolOutput, ExecutorErr
         .next()
         .unwrap_or(&input.tool_ref);
 
+    tracing::info!("[Executor] tool_ref='{}' -> tool_name='{}'", input.tool_ref, tool_name);
+
     let outputs = match tool_name {
         "file-read" => execute_file_read(input)?,
         "pdf-read" => execute_pdf_read(input)?,
@@ -283,12 +285,25 @@ fn execute_text_split(input: &ToolInput) -> Result<serde_json::Value, ExecutorEr
 }
 
 fn execute_text_merge(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
-    let texts = input
-        .inputs
-        .get("texts")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
+    // Handle both array and single string inputs
+    let texts: Vec<serde_json::Value> = match input.inputs.get("texts") {
+        Some(serde_json::Value::Array(arr)) => arr.clone(),
+        Some(serde_json::Value::String(s)) => vec![serde_json::Value::String(s.clone())],
+        Some(other) => vec![other.clone()],
+        None => vec![],
+    };
+
+    // Also check for "text" input (singular) as fallback
+    let texts = if texts.is_empty() {
+        match input.inputs.get("text") {
+            Some(serde_json::Value::Array(arr)) => arr.clone(),
+            Some(serde_json::Value::String(s)) => vec![serde_json::Value::String(s.clone())],
+            Some(other) => vec![other.clone()],
+            None => vec![],
+        }
+    } else {
+        texts
+    };
 
     let separator = input
         .config
@@ -298,7 +313,10 @@ fn execute_text_merge(input: &ToolInput) -> Result<serde_json::Value, ExecutorEr
 
     let merged: String = texts
         .iter()
-        .filter_map(|v| v.as_str())
+        .map(|v| match v {
+            serde_json::Value::String(s) => s.clone(),
+            other => other.to_string(),
+        })
         .collect::<Vec<_>>()
         .join(separator);
 
@@ -538,6 +556,7 @@ async fn execute_delay(input: &ToolInput) -> Result<serde_json::Value, ExecutorE
 // ---- LLM Tool Implementations ----
 
 async fn execute_llm_chat(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
+    tracing::info!("[LLM Chat] Starting with inputs: {}", input.inputs);
     let prompt = input
         .inputs
         .get("prompt")
@@ -551,11 +570,27 @@ async fn execute_llm_chat(input: &ToolInput) -> Result<serde_json::Value, Execut
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
-    let system_prompt = input
+    let language = input
+        .config
+        .get("language")
+        .and_then(|v| v.as_str())
+        .unwrap_or("auto");
+
+    let language_instruction = match language {
+        "korean" | "ko" => " You MUST respond in Korean (한국어).",
+        "english" | "en" => " You MUST respond in English.",
+        "japanese" | "ja" => " You MUST respond in Japanese (日本語).",
+        "chinese" | "zh" => " You MUST respond in Chinese (中文).",
+        _ => "",
+    };
+
+    let base_system_prompt = input
         .config
         .get("system_prompt")
         .and_then(|v| v.as_str())
         .unwrap_or("You are a helpful assistant.");
+
+    let system_prompt = format!("{}{}", base_system_prompt, language_instruction);
 
     let model = input
         .config
@@ -582,36 +617,66 @@ async fn execute_llm_chat(input: &ToolInput) -> Result<serde_json::Value, Execut
         format!("Context:\n{context}\n\nQuestion/Task:\n{prompt}")
     };
 
-    // Try providers in order: Anthropic, OpenAI, Bedrock, Local
+    // Try providers in order: Anthropic, OpenAI, Bedrock (IAM), Bedrock (Bearer), Local
     if let Ok(api_key) = std::env::var("ANTHROPIC_API_KEY") {
-        return call_anthropic_api(&api_key, model, &full_prompt, system_prompt, max_tokens, temperature).await;
+        return call_anthropic_api(&api_key, model, &full_prompt, &system_prompt, max_tokens, temperature).await;
     }
 
     if let Ok(api_key) = std::env::var("OPENAI_API_KEY") {
         let openai_model = if model.contains("claude") { "gpt-4o" } else { model };
-        return call_openai_api(&api_key, openai_model, &full_prompt, system_prompt, max_tokens, temperature).await;
+        return call_openai_api(&api_key, openai_model, &full_prompt, &system_prompt, max_tokens, temperature).await;
     }
 
+    // Try AWS Bedrock with IAM credentials (Signature V4)
+    if let (Ok(access_key), Ok(secret_key)) = (
+        std::env::var("AWS_ACCESS_KEY_ID"),
+        std::env::var("AWS_SECRET_ACCESS_KEY"),
+    ) {
+        let region = std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string());
+        return call_bedrock_iam_api(&access_key, &secret_key, &region, model, &full_prompt, &system_prompt, max_tokens, temperature).await;
+    }
+
+    // Try Bedrock with Bearer token
     if let Ok(api_key) = std::env::var("BEDROCK_API_KEY") {
         let region = std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string());
-        return call_bedrock_api(&api_key, &region, model, &full_prompt, system_prompt, max_tokens, temperature).await;
+        return call_bedrock_api(&api_key, &region, model, &full_prompt, &system_prompt, max_tokens, temperature).await;
     }
 
     if let Ok(endpoint) = std::env::var("LOCAL_LLM_ENDPOINT") {
-        return call_local_llm_api(&endpoint, model, &full_prompt, system_prompt, max_tokens, temperature).await;
+        return call_local_llm_api(&endpoint, model, &full_prompt, &system_prompt, max_tokens, temperature).await;
     }
 
     Err(ExecutorError::ExecutionFailed(
-        "No LLM API key configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, BEDROCK_API_KEY, or LOCAL_LLM_ENDPOINT.".into()
+        "No LLM API key configured. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, AWS_ACCESS_KEY_ID+AWS_SECRET_ACCESS_KEY, or LOCAL_LLM_ENDPOINT.".into()
     ))
 }
 
 async fn execute_llm_summarize(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
-    let text = input
-        .inputs
-        .get("text")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    // Handle both string and array inputs (from text-split chunks)
+    let text = match input.inputs.get("text") {
+        Some(serde_json::Value::String(s)) => s.clone(),
+        Some(serde_json::Value::Array(arr)) => {
+            // Join array elements into single string
+            arr.iter()
+                .filter_map(|v| match v {
+                    serde_json::Value::String(s) => Some(s.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n\n")
+        }
+        Some(other) => other.to_string(),
+        None => String::new(),
+    };
+
+    // If text is empty, return early with error
+    if text.trim().is_empty() {
+        return Err(ExecutorError::ExecutionFailed(
+            "No text provided for summarization. Check that the input connection is correct.".into()
+        ));
+    }
+
+    tracing::info!("[LLM Summarize] Text length: {} chars", text.len());
 
     let style = input
         .config
@@ -619,10 +684,24 @@ async fn execute_llm_summarize(input: &ToolInput) -> Result<serde_json::Value, E
         .and_then(|v| v.as_str())
         .unwrap_or("concise");
 
+    let language = input
+        .config
+        .get("language")
+        .and_then(|v| v.as_str())
+        .unwrap_or("auto");
+
+    let language_instruction = match language {
+        "korean" | "ko" => "You MUST respond in Korean (한국어).",
+        "english" | "en" => "You MUST respond in English.",
+        "japanese" | "ja" => "You MUST respond in Japanese (日本語).",
+        "chinese" | "zh" => "You MUST respond in Chinese (中文).",
+        _ => "Respond in the same language as the input text.",
+    };
+
     let system_prompt = format!(
         "You are a summarization expert. Create a {} summary of the given text. \
-        Focus on the key points and main ideas.",
-        style
+        Focus on the key points and main ideas. {}",
+        style, language_instruction
     );
 
     let summary_prompt = format!("Please summarize the following text:\n\n{text}");
@@ -833,6 +912,158 @@ async fn call_bedrock_api(
         .send()
         .await
         .map_err(|e| ExecutorError::ExecutionFailed(format!("Bedrock request failed: {e}")))?;
+
+    if !response.status().is_success() {
+        let error_body = response.text().await.unwrap_or_default();
+        return Err(ExecutorError::ExecutionFailed(format!("Bedrock API error: {error_body}")));
+    }
+
+    let result: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("Response parse failed: {e}")))?;
+
+    let text = result["content"][0]["text"].as_str().unwrap_or("").to_string();
+
+    Ok(serde_json::json!({
+        "response": text,
+        "model": model_id,
+        "input_tokens": result["usage"]["input_tokens"].as_i64().unwrap_or(0),
+        "output_tokens": result["usage"]["output_tokens"].as_i64().unwrap_or(0)
+    }))
+}
+
+async fn call_bedrock_iam_api(
+    access_key: &str,
+    secret_key: &str,
+    region: &str,
+    model: &str,
+    prompt: &str,
+    system_prompt: &str,
+    max_tokens: i32,
+    temperature: f32,
+) -> Result<serde_json::Value, ExecutorError> {
+    use chrono::Utc;
+    use hmac::{Hmac, Mac};
+    use sha2::{Digest, Sha256};
+    use std::collections::BTreeMap;
+
+    type HmacSha256 = Hmac<Sha256>;
+
+    fn sign(key: &[u8], msg: &[u8]) -> Vec<u8> {
+        let mut mac = HmacSha256::new_from_slice(key).expect("HMAC can take key of any size");
+        mac.update(msg);
+        mac.finalize().into_bytes().to_vec()
+    }
+
+    fn get_signature_key(secret_key: &str, date_stamp: &str, region: &str, service: &str) -> Vec<u8> {
+        let k_date = sign(format!("AWS4{}", secret_key).as_bytes(), date_stamp.as_bytes());
+        let k_region = sign(&k_date, region.as_bytes());
+        let k_service = sign(&k_region, service.as_bytes());
+        sign(&k_service, b"aws4_request")
+    }
+
+    fn sha256_hash(data: &[u8]) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(data);
+        hex::encode(hasher.finalize())
+    }
+
+    // Convert model name to Bedrock model ID format
+    let model_id = if model.starts_with("anthropic.") {
+        model.to_string()
+    } else {
+        // Map common model names to Bedrock model IDs
+        match model {
+            "claude-3-5-sonnet-20240620" | "claude-3-5-sonnet" | "claude-sonnet-4-20250514" =>
+                "anthropic.claude-3-5-sonnet-20240620-v1:0".to_string(),
+            "claude-3-5-sonnet-20241022" =>
+                "anthropic.claude-3-5-sonnet-20241022-v2:0".to_string(),
+            "claude-3-haiku-20240307" | "claude-3-haiku" =>
+                "anthropic.claude-3-haiku-20240307-v1:0".to_string(),
+            "claude-3-sonnet-20240229" | "claude-3-sonnet" =>
+                "anthropic.claude-3-sonnet-20240229-v1:0".to_string(),
+            "claude-3-opus-20240229" | "claude-3-opus" =>
+                "anthropic.claude-3-opus-20240229-v1:0".to_string(),
+            _ if model.contains("claude") =>
+                // Try to construct a valid ID
+                format!("anthropic.{}-v1:0", model),
+            _ =>
+                // Default to Claude 3.5 Sonnet
+                "anthropic.claude-3-5-sonnet-20240620-v1:0".to_string(),
+        }
+    };
+
+    let body = serde_json::json!({
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "system": system_prompt,
+        "messages": [{"role": "user", "content": prompt}]
+    });
+
+    let payload = serde_json::to_vec(&body)
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("JSON serialization failed: {e}")))?;
+
+    let host = format!("bedrock-runtime.{}.amazonaws.com", region);
+    // Manually encode model_id for canonical URI (: -> %3A)
+    let encoded_model_id = model_id.replace(":", "%3A");
+    let canonical_uri = format!("/model/{}/invoke", encoded_model_id);
+    let url = format!("https://{}{}", host, canonical_uri.replace("%3A", ":"));
+
+    let now = Utc::now();
+    let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
+    let date_stamp = now.format("%Y%m%d").to_string();
+
+    let payload_hash = sha256_hash(&payload);
+
+    let mut signed_headers_map = BTreeMap::new();
+    signed_headers_map.insert("content-type".to_string(), "application/json".to_string());
+    signed_headers_map.insert("host".to_string(), host.clone());
+    signed_headers_map.insert("x-amz-date".to_string(), amz_date.clone());
+
+    let signed_headers: Vec<String> = signed_headers_map.keys().cloned().collect();
+    let signed_headers_str = signed_headers.join(";");
+
+    let canonical_headers: String = signed_headers_map
+        .iter()
+        .map(|(k, v)| format!("{}:{}\n", k.to_lowercase(), v.trim()))
+        .collect();
+
+    let canonical_request = format!(
+        "POST\n{}\n\n{}\n{}\n{}",
+        canonical_uri, canonical_headers, signed_headers_str, payload_hash
+    );
+
+    let algorithm = "AWS4-HMAC-SHA256";
+    let credential_scope = format!("{}/{}/bedrock/aws4_request", date_stamp, region);
+    let string_to_sign = format!(
+        "{}\n{}\n{}\n{}",
+        algorithm,
+        amz_date,
+        credential_scope,
+        sha256_hash(canonical_request.as_bytes())
+    );
+
+    let signing_key = get_signature_key(secret_key, &date_stamp, region, "bedrock");
+    let signature = hex::encode(sign(&signing_key, string_to_sign.as_bytes()));
+
+    let authorization_header = format!(
+        "{} Credential={}/{}, SignedHeaders={}, Signature={}",
+        algorithm, access_key, credential_scope, signed_headers_str, signature
+    );
+
+    let client = reqwest::Client::new();
+    let response = client
+        .post(&url)
+        .header("Authorization", &authorization_header)
+        .header("Content-Type", "application/json")
+        .header("x-amz-date", &amz_date)
+        .header("x-amz-content-sha256", &payload_hash)
+        .body(payload)
+        .send()
+        .await
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("Bedrock IAM request failed: {e}")))?;
 
     if !response.status().is_success() {
         let error_body = response.text().await.unwrap_or_default();

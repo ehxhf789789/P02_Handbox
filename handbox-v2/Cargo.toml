@@ -34,6 +34,15 @@ semver = { version = "1", features = ["serde"] }
 sha2 = "0.10"
 hex = "0.4"
 jmespath = "0.3"
+async-recursion = "1"
+
+# HTTP & AWS
+reqwest = { version = "0.12", features = ["json", "native-tls"] }
+hmac = "0.12"
+base64 = "0.22"
+dirs = "5"
+url = "2"
+urlencoding = "2"
 
 # Internal crates
 hb-core = { path = "crates/hb-core" }

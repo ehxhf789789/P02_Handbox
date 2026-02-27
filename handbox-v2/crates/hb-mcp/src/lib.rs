@@ -7,6 +7,9 @@ pub mod index;
 pub mod registry;
 pub mod server;
 
+// Re-export commonly used types
+pub use client::{McpClient, RemoteTool, ServerInfo, Transport};
+
 use thiserror::Error;
 
 #[derive(Debug, Error)]

@@ -5,15 +5,25 @@ import ReactDOM from 'react-dom/client'
 import { registerBuiltinExecutors } from './executors'
 import { registerBuiltinProviders } from './providers'
 import { registerBuiltinPlugins, initializePluginSystem } from './plugins'
-import { registerAllTools } from './tools'
+import { initializeTools, getToolStats } from './tools'
 
-// NodeRegistry에 먼저 등록해야 WorkflowEditor가 정상 작동
-registerBuiltinExecutors()
+// 1. 프로바이더 등록 (LLM, Cloud 등)
 registerBuiltinProviders()
+
+// 2. 플러그인 시스템 등록
 registerBuiltinPlugins()
 
-// Tier 1 도구 시스템 등록 (52개 내장 노드)
-registerAllTools()
+// 3. 레거시 executor 등록 (NodeRegistry - 하위 호환)
+registerBuiltinExecutors()
+
+// 4. 통합 도구 시스템 초기화 (ToolRegistry - 144+ 원자화 도구)
+initializeTools()
+
+// 도구 통계 로깅
+const stats = getToolStats()
+console.log(`[Handbox] 도구 시스템 초기화 완료:`)
+console.log(`  - 통합 도구: ${stats.total}개 (17개 카테고리)`)
+console.log(`  - 카테고리:`, Object.entries(stats.byCategory).map(([k, v]) => `${k}(${v})`).join(', '))
 
 // Tier 2 플러그인 시스템 비동기 초기화 (설치된 플러그인 복원)
 initializePluginSystem().catch(err =>
@@ -129,49 +139,142 @@ if ((import.meta as any).env?.DEV) {
     return summary
   }
 
-  // 시뮬레이션 인스턴스도 노출
+  // RL 시뮬레이션 시스템 노출 (개발자 전용)
+  import('./testing').then(({
+    runRLTest,
+    startRLSimulation,
+    verifySimulationRealism,
+    initializeRLSimulation,
+    pauseSimulation,
+    resumeSimulation,
+    stopSimulation,
+    getSimulationState,
+  }) => {
+    // @ts-ignore
+    window.runRLTest = runRLTest
+    // @ts-ignore
+    window.startRLSimulation = startRLSimulation
+    // @ts-ignore
+    window.verifyRealism = verifySimulationRealism
+    // @ts-ignore
+    window.initRLSimulation = initializeRLSimulation
+    // @ts-ignore
+    window.pauseRLSimulation = pauseSimulation
+    // @ts-ignore
+    window.resumeRLSimulation = resumeSimulation
+    // @ts-ignore
+    window.stopRLSimulation = stopSimulation
+    // @ts-ignore
+    window.getRLState = getSimulationState
+  })
+
+  // RL 시뮬레이션 인스턴스 및 개발자 도구 노출
+  import('./testing/RLSimulationSystem').then(({ rlSimulationSystem }) => {
+    // @ts-ignore - 전체 시스템 인스턴스
+    window.rl = rlSimulationSystem
+
+    // @ts-ignore - 개발자 제어판 헬퍼
+    window.rlDevTools = {
+      // 상태 조회
+      status: () => rlSimulationSystem.getDeveloperControl(),
+      state: () => rlSimulationSystem.getState(),
+      stats: () => rlSimulationSystem.getStats(),
+      apiUsage: () => rlSimulationSystem.getAPIUsage(),
+
+      // 제어
+      pause: () => rlSimulationSystem.pause(),
+      resume: () => rlSimulationSystem.resume(),
+      stop: () => rlSimulationSystem.stop(),
+      emergencyStop: () => rlSimulationSystem.emergencyStop(),
+
+      // 가드레일
+      clearCooldown: () => rlSimulationSystem.clearCooldown(),
+      resetDailyCounters: () => rlSimulationSystem.resetDailyCounters(),
+      updateGuardrails: (config: any) => rlSimulationSystem.updateGuardrails(config),
+
+      // 학습 데이터 관리
+      queryData: (query: any) => rlSimulationSystem.queryExperiences(query),
+      exportData: () => rlSimulationSystem.exportLearningData(),
+      importData: (data: any) => rlSimulationSystem.importLearningData(data),
+      clearAllData: () => rlSimulationSystem.clearAllLearningData(),
+      deleteOldData: (days: number) => rlSimulationSystem.deleteExperiencesByCondition({
+        olderThan: new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+      }),
+      deleteFailedData: () => rlSimulationSystem.deleteExperiencesByCondition({ failed: true }),
+
+      // 도움말
+      help: () => {
+        console.log('═'.repeat(70))
+        console.log('🛠️  RL 시뮬레이션 개발자 도구')
+        console.log('═'.repeat(70))
+        console.log('')
+        console.log('📊 상태 조회:')
+        console.log('  rlDevTools.status()       - 통합 제어 상태')
+        console.log('  rlDevTools.state()        - 시뮬레이션 상태')
+        console.log('  rlDevTools.stats()        - 메트릭 통계')
+        console.log('  rlDevTools.apiUsage()     - API 사용량')
+        console.log('')
+        console.log('🎮 제어:')
+        console.log('  rlDevTools.pause()        - 일시정지')
+        console.log('  rlDevTools.resume()       - 재개')
+        console.log('  rlDevTools.stop()         - 중지')
+        console.log('  rlDevTools.emergencyStop() - 긴급 중지 (쿨다운 포함)')
+        console.log('')
+        console.log('🛡️ 가드레일:')
+        console.log('  rlDevTools.clearCooldown()      - 쿨다운 해제')
+        console.log('  rlDevTools.resetDailyCounters() - 일일 카운터 리셋')
+        console.log('  rlDevTools.updateGuardrails({   - 가드레일 설정')
+        console.log('    maxAPICallsPerHour: 1000,')
+        console.log('    maxCostPerDay: 100')
+        console.log('  })')
+        console.log('')
+        console.log('📁 학습 데이터 관리:')
+        console.log('  rlDevTools.exportData()          - JSON 내보내기')
+        console.log('  rlDevTools.importData(json)      - JSON 가져오기')
+        console.log('  rlDevTools.queryData({           - 데이터 조회')
+        console.log('    filter: { success: true, minReward: 2 },')
+        console.log('    sort: { field: "reward", order: "desc" },')
+        console.log('    pagination: { offset: 0, limit: 10 }')
+        console.log('  })')
+        console.log('  rlDevTools.deleteOldData(30)     - 30일 이전 데이터 삭제')
+        console.log('  rlDevTools.deleteFailedData()    - 실패 데이터 삭제')
+        console.log('  rlDevTools.clearAllData()        - 전체 초기화 ⚠️')
+        console.log('═'.repeat(70))
+      },
+    }
+  })
+
+  // 기존 시뮬레이션 인스턴스도 노출
   import('./testing/WorkflowSimulator').then(({ workflowSimulator }) => {
     // @ts-ignore
     window.simulator = workflowSimulator
-    console.log('═'.repeat(60))
-    console.log('[Dev] 시뮬레이션 시스템 v2.0 준비 완료')
-    console.log('═'.repeat(60))
-    console.log('📋 사용 가능한 명령어:')
-    console.log('  • window.runSimulation()       - 100건 시뮬레이션 (기본)')
-    console.log('  • window.runSimulation(500)    - 500건 시뮬레이션')
+    console.log('═'.repeat(70))
+    console.log('[Dev] 시뮬레이션 시스템 v2.0 + RL 시스템 준비 완료')
+    console.log('═'.repeat(70))
+    console.log('📋 기본 시뮬레이션:')
+    console.log('  • window.runSimulation()       - 100건 시뮬레이션')
     console.log('  • window.runUntilSuccess(100)  - 100건 성공까지 반복')
     console.log('  • window.simulator.stop()      - 시뮬레이션 중지')
     console.log('')
-    console.log('📊 평가 기준:')
-    console.log('  • XAI 점수: 21/30점 이상 합격')
-    console.log('  • 경쟁 점수: 42/60점 이상 합격')
-    console.log('  • 프롬프트 유형: 단순(20%), 복잡(40%), 긴(30%), 멀티턴(10%)')
-    console.log('═'.repeat(60))
+    console.log('🧠 RL 시뮬레이션 (강화학습 기반, 개발자 전용):')
+    console.log('  • window.runRLTest()           - 100건 테스트 (시스템 검증)')
+    console.log('  • window.startRLSimulation()   - 20,000건 전체 시뮬레이션')
+    console.log('  • window.stopRLSimulation()    - 시뮬레이션 중지')
+    console.log('  • window.getRLState()          - 상태 조회')
+    console.log('')
+    console.log('🛠️ 개발자 도구:')
+    console.log('  • rlDevTools.help()            - 전체 명령어 도움말')
+    console.log('  • rlDevTools.status()          - 통합 상태 조회')
+    console.log('  • rlDevTools.apiUsage()        - API 사용량 확인')
+    console.log('  • rlDevTools.emergencyStop()   - 긴급 중지')
+    console.log('═'.repeat(70))
 
-    // 자동 시뮬레이션: 개발 모드에서 기본 활성화
-    // runUntilSuccess로 무한 반복 (목표 달성까지)
-    const autoSimDisabled = localStorage.getItem('autoSimulation') === 'disabled'
-    if (!autoSimDisabled) {
-      console.log('[Dev] 5초 후 자동 시뮬레이션 시작 (무한 반복 - 목표 달성까지)')
-      setTimeout(async () => {
-        console.log('[Dev] 🚀 자동 시뮬레이션 시작 (무한 반복, 다양한 패턴)...')
-        try {
-          // @ts-ignore - runUntilSuccess로 목표 달성까지 무한 반복
-          const summary = await window.runUntilSuccess(1000)
-          console.log('[Dev] 자동 시뮬레이션 완료')
-
-          // 버그가 발견되면 상세 로그
-          if (summary.bugsDetected > 0) {
-            console.error('[Dev] 🐛 버그 발견!')
-            console.log('버그 상세:', summary.bugs)
-          }
-        } catch (err) {
-          console.error('[Dev] 자동 시뮬레이션 실패:', err)
-        }
-      }, 5000)
-    } else {
-      console.log('[Dev] 자동 시뮬레이션 비활성화. 활성화: localStorage.setItem("autoSimulation", "enabled")')
-    }
+    // ⚠️ 자동 시뮬레이션 비활성화 (개발자 전용 기능)
+    // RL 시뮬레이션은 API 비용이 발생하므로 수동으로만 실행
+    console.log('')
+    console.log('⚠️ RL 시뮬레이션은 수동 실행 전용입니다.')
+    console.log('   실행: window.startRLSimulation()')
+    console.log('   테스트: window.runRLTest()')
   })
 }
 

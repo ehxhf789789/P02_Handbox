@@ -74,3 +74,34 @@ pub async fn import_workflow(
     state.workflows.write().await.insert(id, spec.clone());
     Ok(spec)
 }
+
+#[derive(serde::Serialize)]
+pub struct ExportResult {
+    pub path: String,
+}
+
+#[tauri::command]
+pub async fn export_workflow_file(
+    content: String,
+    filename: String,
+    state: State<'_, AppState>,
+) -> Result<ExportResult, String> {
+    // Get documents directory or use data_dir
+    let docs_dir = dirs::document_dir()
+        .or_else(|| dirs::download_dir())
+        .unwrap_or_else(|| state.data_dir.clone());
+
+    // Create Handbox exports directory
+    let export_dir = docs_dir.join("Handbox").join("exports");
+    std::fs::create_dir_all(&export_dir)
+        .map_err(|e| format!("Failed to create export directory: {e}"))?;
+
+    // Write file
+    let file_path = export_dir.join(&filename);
+    std::fs::write(&file_path, &content)
+        .map_err(|e| format!("Failed to write file: {e}"))?;
+
+    Ok(ExportResult {
+        path: file_path.to_string_lossy().to_string(),
+    })
+}

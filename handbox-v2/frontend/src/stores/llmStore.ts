@@ -1,10 +1,16 @@
 /**
  * LLM Provider store — manages LLM connections and invocations.
+ *
+ * Features:
+ * - Multi-provider support (Bedrock, OpenAI, Anthropic, Local)
+ * - Per-node model override
+ * - Automatic trace capture for debugging
+ * - Fallback chain support
  */
 
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { invoke } from '@tauri-apps/api/core'
+import { isTauri, safeInvoke } from '@/utils/tauri'
 import type {
   LLMProvider,
   LLMRequest,
@@ -13,7 +19,10 @@ import type {
   ConnectionResult,
   EmbeddingRequest,
   EmbeddingResponse,
+  NodeModelOverride,
+  WorkflowModelConfig,
 } from '@/types'
+import { useTraceStore } from './traceStore'
 
 /** Credential status from backend */
 interface CredentialStatus {
@@ -22,6 +31,16 @@ interface CredentialStatus {
   has_openai: boolean
   has_anthropic: boolean
   local_endpoint: string | null
+}
+
+/** Extended LLM request with node context */
+interface LLMRequestWithContext extends LLMRequest {
+  /** Node ID for per-node model override */
+  nodeId?: string
+  /** Execution ID for trace correlation */
+  executionId?: string
+  /** Enable trace capture (default: true) */
+  enableTrace?: boolean
 }
 
 interface LLMState {
@@ -48,6 +67,15 @@ interface LLMState {
     local: { endpoint: string }
   }
 
+  /** Workflow-level model configuration */
+  workflowModelConfig: WorkflowModelConfig | null
+
+  /** Per-node model overrides (for current workflow) */
+  nodeOverrides: NodeModelOverride[]
+
+  /** Fallback chain configuration */
+  fallbackEnabled: boolean
+
   /** Loading states */
   isConnecting: boolean
   isInvoking: boolean
@@ -56,6 +84,16 @@ interface LLMState {
   setActiveProvider: (provider: LLMProvider) => void
   setSelectedModel: (provider: LLMProvider, modelId: string) => void
   setConfig: <T extends LLMProvider>(provider: T, config: LLMState['config'][T]) => void
+
+  /** Per-node model override actions */
+  setNodeOverride: (nodeId: string, provider: LLMProvider, modelId: string, reason?: string) => void
+  removeNodeOverride: (nodeId: string) => void
+  clearNodeOverrides: () => void
+  getModelForNode: (nodeId: string) => { provider: LLMProvider; modelId: string }
+
+  /** Workflow model config actions */
+  setWorkflowModelConfig: (config: WorkflowModelConfig | null) => void
+  setFallbackEnabled: (enabled: boolean) => void
 
   /** API calls */
   loadCredentialStatus: () => Promise<CredentialStatus>
@@ -67,7 +105,8 @@ interface LLMState {
   setLocalEndpoint: (endpoint: string) => Promise<boolean>
   testConnection: (provider: LLMProvider) => Promise<ConnectionResult>
   loadModels: (provider: LLMProvider) => Promise<ModelInfo[]>
-  invokeLLM: (request: LLMRequest) => Promise<LLMResponse>
+  invokeLLM: (request: LLMRequestWithContext) => Promise<LLMResponse>
+  invokeLLMWithFallback: (request: LLMRequestWithContext) => Promise<LLMResponse>
   createEmbedding: (request: EmbeddingRequest) => Promise<EmbeddingResponse>
 }
 
@@ -100,6 +139,9 @@ export const useLLMStore = create<LLMState>()(
         anthropic: {},
         local: { endpoint: 'http://localhost:11434' },
       },
+      workflowModelConfig: null,
+      nodeOverrides: [],
+      fallbackEnabled: true,
       isConnecting: false,
       isInvoking: false,
 
@@ -115,9 +157,69 @@ export const useLLMStore = create<LLMState>()(
           config: { ...state.config, [provider]: config },
         })),
 
+      // Per-node model override methods
+      setNodeOverride: (nodeId, provider, modelId, reason) => {
+        set((state) => {
+          const existing = state.nodeOverrides.filter((o) => o.nodeId !== nodeId)
+          return {
+            nodeOverrides: [...existing, { nodeId, provider, modelId, reason }],
+          }
+        })
+      },
+
+      removeNodeOverride: (nodeId) => {
+        set((state) => ({
+          nodeOverrides: state.nodeOverrides.filter((o) => o.nodeId !== nodeId),
+        }))
+      },
+
+      clearNodeOverrides: () => {
+        set({ nodeOverrides: [] })
+      },
+
+      getModelForNode: (nodeId) => {
+        const state = get()
+        const override = state.nodeOverrides.find((o) => o.nodeId === nodeId)
+        if (override) {
+          return { provider: override.provider, modelId: override.modelId }
+        }
+        // Fall back to workflow config or active provider
+        if (state.workflowModelConfig) {
+          const nodeOverride = state.workflowModelConfig.nodeOverrides.find(
+            (o) => o.nodeId === nodeId
+          )
+          if (nodeOverride) {
+            return { provider: nodeOverride.provider, modelId: nodeOverride.modelId }
+          }
+          return {
+            provider: state.workflowModelConfig.defaultProvider,
+            modelId: state.workflowModelConfig.defaultModelId,
+          }
+        }
+        return {
+          provider: state.activeProvider,
+          modelId: state.selectedModel[state.activeProvider],
+        }
+      },
+
+      setWorkflowModelConfig: (config) => {
+        set({ workflowModelConfig: config })
+      },
+
+      setFallbackEnabled: (enabled) => {
+        set({ fallbackEnabled: enabled })
+      },
+
       loadCredentialStatus: async () => {
+        if (!isTauri()) {
+          console.warn('[llmStore] Not in Tauri environment')
+          return { has_bedrock: false, bedrock_region: null, has_openai: false, has_anthropic: false, local_endpoint: null }
+        }
         try {
-          const status = await invoke<CredentialStatus>('get_credential_status')
+          const status = await safeInvoke<CredentialStatus>('get_credential_status')
+          if (!status) {
+            return { has_bedrock: false, bedrock_region: null, has_openai: false, has_anthropic: false, local_endpoint: null }
+          }
           set({ credentialStatus: status })
           // Update local config from saved credentials
           if (status.bedrock_region) {
@@ -138,14 +240,18 @@ export const useLLMStore = create<LLMState>()(
       },
 
       setBedrockCredentials: async (accessKeyId, secretAccessKey, region) => {
+        if (!isTauri()) {
+          console.warn('[llmStore] Not in Tauri environment')
+          return false
+        }
         try {
-          const result = await invoke<boolean>('set_bedrock_credentials', { accessKeyId, secretAccessKey, region })
-          if (region) {
+          const result = await safeInvoke<boolean>('set_bedrock_credentials', { accessKeyId, secretAccessKey, region })
+          if (result && region) {
             set((state) => ({
               config: { ...state.config, bedrock: { region } },
             }))
           }
-          return result
+          return result ?? false
         } catch (error) {
           console.error('Failed to set Bedrock credentials:', error)
           return false
@@ -153,12 +259,15 @@ export const useLLMStore = create<LLMState>()(
       },
 
       setBedrockRegion: async (region) => {
+        if (!isTauri()) return false
         try {
-          const result = await invoke<boolean>('set_bedrock_region', { region })
-          set((state) => ({
-            config: { ...state.config, bedrock: { region } },
-          }))
-          return result
+          const result = await safeInvoke<boolean>('set_bedrock_region', { region })
+          if (result) {
+            set((state) => ({
+              config: { ...state.config, bedrock: { region } },
+            }))
+          }
+          return result ?? false
         } catch (error) {
           console.error('Failed to set Bedrock region:', error)
           return false
@@ -166,8 +275,9 @@ export const useLLMStore = create<LLMState>()(
       },
 
       clearLLMCredentials: async () => {
+        if (!isTauri()) return false
         try {
-          return await invoke<boolean>('clear_llm_credentials')
+          return (await safeInvoke<boolean>('clear_llm_credentials')) ?? false
         } catch (error) {
           console.error('Failed to clear LLM credentials:', error)
           return false
@@ -175,8 +285,9 @@ export const useLLMStore = create<LLMState>()(
       },
 
       setOpenAIApiKey: async (apiKey) => {
+        if (!isTauri()) return false
         try {
-          return await invoke<boolean>('set_openai_api_key', { apiKey })
+          return (await safeInvoke<boolean>('set_openai_api_key', { apiKey })) ?? false
         } catch (error) {
           console.error('Failed to set OpenAI API key:', error)
           return false
@@ -184,8 +295,9 @@ export const useLLMStore = create<LLMState>()(
       },
 
       setAnthropicApiKey: async (apiKey) => {
+        if (!isTauri()) return false
         try {
-          return await invoke<boolean>('set_anthropic_api_key', { apiKey })
+          return (await safeInvoke<boolean>('set_anthropic_api_key', { apiKey })) ?? false
         } catch (error) {
           console.error('Failed to set Anthropic API key:', error)
           return false
@@ -193,12 +305,15 @@ export const useLLMStore = create<LLMState>()(
       },
 
       setLocalEndpoint: async (endpoint) => {
+        if (!isTauri()) return false
         try {
-          const result = await invoke<boolean>('set_local_llm_endpoint', { endpoint })
-          set((state) => ({
-            config: { ...state.config, local: { endpoint } },
-          }))
-          return result
+          const result = await safeInvoke<boolean>('set_local_llm_endpoint', { endpoint })
+          if (result) {
+            set((state) => ({
+              config: { ...state.config, local: { endpoint } },
+            }))
+          }
+          return result ?? false
         } catch (error) {
           console.error('Failed to set local LLM endpoint:', error)
           return false
@@ -207,13 +322,28 @@ export const useLLMStore = create<LLMState>()(
 
       testConnection: async (provider) => {
         set({ isConnecting: true })
-        try {
-          const result = await invoke<ConnectionResult>('test_llm_connection', { provider })
+        if (!isTauri()) {
+          const errorResult: ConnectionResult = {
+            connected: false,
+            provider,
+            error: 'Not in Tauri environment',
+          }
           set((state) => ({
-            connectionStatus: { ...state.connectionStatus, [provider]: result },
+            connectionStatus: { ...state.connectionStatus, [provider]: errorResult },
             isConnecting: false,
           }))
-          return result
+          return errorResult
+        }
+        try {
+          const result = await safeInvoke<ConnectionResult>('test_llm_connection', { provider })
+          if (result) {
+            set((state) => ({
+              connectionStatus: { ...state.connectionStatus, [provider]: result },
+              isConnecting: false,
+            }))
+            return result
+          }
+          throw new Error('No result from backend')
         } catch (error) {
           const errorResult: ConnectionResult = {
             connected: false,
@@ -229,12 +359,16 @@ export const useLLMStore = create<LLMState>()(
       },
 
       loadModels: async (provider) => {
+        if (!isTauri()) return []
         try {
-          const models = await invoke<ModelInfo[]>('list_llm_models', { provider })
-          set((state) => ({
-            models: { ...state.models, [provider]: models },
-          }))
-          return models
+          const models = await safeInvoke<ModelInfo[]>('list_llm_models', { provider })
+          if (models) {
+            set((state) => ({
+              models: { ...state.models, [provider]: models },
+            }))
+            return models
+          }
+          return []
         } catch (error) {
           console.error('Failed to load models:', error)
           return []
@@ -243,28 +377,128 @@ export const useLLMStore = create<LLMState>()(
 
       invokeLLM: async (request) => {
         set({ isInvoking: true })
+        const traceStore = useTraceStore.getState()
+
+        if (!isTauri()) {
+          set({ isInvoking: false })
+          throw new Error('Not in Tauri environment - LLM invocation requires native app')
+        }
+
+        // Determine model based on node override if nodeId provided
+        let provider = request.provider
+        let modelId = request.modelId
+
+        if (request.nodeId) {
+          const nodeModel = get().getModelForNode(request.nodeId)
+          provider = provider || nodeModel.provider
+          modelId = modelId || nodeModel.modelId
+        }
+
+        const { activeProvider, selectedModel } = get()
+        provider = provider || activeProvider
+        modelId = modelId || selectedModel[provider]
+
+        // Start trace if enabled (default: true)
+        const enableTrace = request.enableTrace !== false
+        const traceId = enableTrace
+          ? traceStore.startLLMTrace(
+              provider,
+              modelId,
+              request.prompt,
+              request.systemPrompt,
+              request.nodeId,
+              request.executionId
+            )
+          : ''
+
         try {
-          const { activeProvider, selectedModel } = get()
           const fullRequest = {
             prompt: request.prompt,
             system_prompt: request.systemPrompt,
-            model_id: request.modelId || selectedModel[activeProvider],
+            model_id: modelId,
             max_tokens: request.maxTokens || 4096,
             temperature: request.temperature || 0.7,
-            provider: request.provider || activeProvider,
+            provider: provider,
           }
-          const result = await invoke<LLMResponse>('invoke_llm', { request: fullRequest })
+          const result = await safeInvoke<LLMResponse>('invoke_llm', { request: fullRequest })
+
+          if (!result) {
+            throw new Error('No response from LLM backend')
+          }
+
+          // End trace with success
+          if (enableTrace && traceId) {
+            traceStore.endLLMTrace(traceId, result)
+          }
+
           set({ isInvoking: false })
           return result
         } catch (error) {
+          // End trace with error
+          if (enableTrace && traceId) {
+            traceStore.endLLMTrace(traceId, undefined, String(error))
+          }
+
           set({ isInvoking: false })
           throw error
         }
       },
 
+      invokeLLMWithFallback: async (request) => {
+        const { fallbackEnabled, workflowModelConfig, activeProvider, selectedModel } = get()
+
+        // Build fallback chain
+        const fallbackChain = workflowModelConfig?.fallbackChain || [
+          // Default fallback chain: try local first, then cloud
+          { provider: 'local' as LLMProvider, modelId: 'llama3.2' },
+          { provider: 'openai' as LLMProvider, modelId: 'gpt-4o-mini' },
+          { provider: 'anthropic' as LLMProvider, modelId: 'anthropic-sonnet-4-20250514' },
+        ]
+
+        // Primary model
+        const primary = request.nodeId
+          ? get().getModelForNode(request.nodeId)
+          : {
+              provider: request.provider || activeProvider,
+              modelId: request.modelId || selectedModel[request.provider || activeProvider],
+            }
+
+        const modelsToTry = [
+          primary,
+          ...(fallbackEnabled ? fallbackChain : []),
+        ]
+
+        let lastError: Error | null = null
+
+        for (const model of modelsToTry) {
+          try {
+            const result = await get().invokeLLM({
+              ...request,
+              provider: model.provider,
+              modelId: model.modelId,
+            })
+            return result
+          } catch (error) {
+            console.warn(
+              `[LLM Fallback] ${model.provider}/${model.modelId} failed:`,
+              error
+            )
+            lastError = error instanceof Error ? error : new Error(String(error))
+          }
+        }
+
+        throw lastError || new Error('All models in fallback chain failed')
+      },
+
       createEmbedding: async (request) => {
+        if (!isTauri()) {
+          throw new Error('Not in Tauri environment - Embedding creation requires native app')
+        }
         try {
-          const result = await invoke<EmbeddingResponse>('create_embedding', { request })
+          const result = await safeInvoke<EmbeddingResponse>('create_embedding', { request })
+          if (!result) {
+            throw new Error('No response from embedding backend')
+          }
           return result
         } catch (error) {
           throw error
@@ -277,6 +511,8 @@ export const useLLMStore = create<LLMState>()(
         activeProvider: state.activeProvider,
         selectedModel: state.selectedModel,
         config: state.config,
+        fallbackEnabled: state.fallbackEnabled,
+        // Note: nodeOverrides are workflow-specific, not persisted globally
       }),
     }
   )

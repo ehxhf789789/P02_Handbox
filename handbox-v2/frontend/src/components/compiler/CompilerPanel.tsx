@@ -37,16 +37,16 @@ export function CompilerPanel({ onClose, onGenerated }: CompilerPanelProps) {
     try {
       // Try Tauri backend first
       const { compilePrompt } = await import('@/lib/tauri')
+      console.log('[CompilerPanel] Calling compile_prompt with:', prompt)
       const spec = await compilePrompt(prompt) as { nodes: unknown[]; edges: unknown[] }
+      console.log('[CompilerPanel] Received spec:', spec)
       onGenerated(spec.nodes, spec.edges)
       onClose()
-    } catch {
-      // Fallback: generate a simple demo workflow
-      setError('컴파일러가 워크플로우를 생성했습니다 (데모 모드)')
-      setTimeout(() => {
-        onGenerated([], [])
-        onClose()
-      }, 1000)
+    } catch (err) {
+      // Show actual error message
+      const errorMsg = err instanceof Error ? err.message : String(err)
+      console.error('[CompilerPanel] Compilation failed:', errorMsg)
+      setError(`컴파일 실패: ${errorMsg}`)
     } finally {
       setIsCompiling(false)
     }

@@ -5,6 +5,10 @@
  * 워크플로우 생성 품질 향상을 위한 핵심 전처리 모듈.
  */
 
+import { ToolRegistry } from '../registry/ToolRegistry'
+import type { UnifiedToolDefinition } from '../registry/UnifiedToolDefinition'
+
+// Legacy compatibility
 import { NodeRegistry } from '../registry/NodeRegistry'
 import type { NodeDefinition } from '../registry/NodeDefinition'
 

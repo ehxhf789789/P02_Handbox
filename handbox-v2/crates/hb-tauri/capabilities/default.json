@@ -1,0 +1,18 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicegui-org/nicegui-on-air-docker-setup/main/tauri-v2-schema.json",
+  "identifier": "default",
+  "description": "Default capabilities for Handbox",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:event:allow-listen",
+    "core:event:allow-emit",
+    "dialog:default",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "dialog:allow-message",
+    "dialog:allow-ask",
+    "dialog:allow-confirm"
+  ]
+}

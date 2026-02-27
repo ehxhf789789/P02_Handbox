@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 hb-core = { workspace = true }
 hb-tool-executor = { workspace = true }
+hb-mcp = { workspace = true }
 hb-trace = { workspace = true }
 hb-policy = { workspace = true }
 serde = { workspace = true }
@@ -22,3 +23,4 @@ hex = { workspace = true }
 rusqlite = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
+async-recursion = { workspace = true }

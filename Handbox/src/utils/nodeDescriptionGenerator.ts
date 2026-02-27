@@ -11,9 +11,51 @@
  * 4. 일반적인 워크플로우 패턴 제공
  */
 
+import { ToolRegistry } from '../registry/ToolRegistry'
 import { NodeRegistry } from '../registry/NodeRegistry'
+import type { UnifiedToolDefinition } from '../registry/UnifiedToolDefinition'
 import type { NodeDefinition } from '../registry/NodeDefinition'
 import type { PortDefinition, ConfigField } from '../engine/types'
+
+/**
+ * NodeDefinition 또는 UnifiedToolDefinition을 통합 형식으로 변환
+ */
+function normalizeDefinition(def: NodeDefinition | UnifiedToolDefinition): {
+  type: string
+  category: string
+  label: string
+  description: string
+  ports: { inputs: PortDefinition[]; outputs: PortDefinition[] }
+  configSchema: ConfigField[]
+  tags: string[]
+} {
+  // UnifiedToolDefinition 형식 (name 필드 존재)
+  if ('name' in def && typeof def.name === 'string') {
+    const unified = def as UnifiedToolDefinition
+    return {
+      type: unified.name,
+      category: unified.meta.category,
+      label: unified.meta.label,
+      description: unified.description,
+      // PortType와 DataType은 호환되므로 any로 캐스트
+      ports: unified.ports as { inputs: PortDefinition[]; outputs: PortDefinition[] },
+      configSchema: unified.configSchema || [],
+      tags: unified.meta.tags,
+    }
+  }
+
+  // NodeDefinition 형식
+  const nodeDef = def as NodeDefinition
+  return {
+    type: nodeDef.type,
+    category: nodeDef.category,
+    label: nodeDef.meta.label,
+    description: nodeDef.meta.description,
+    ports: nodeDef.ports,
+    configSchema: nodeDef.configSchema,
+    tags: nodeDef.meta.tags,
+  }
+}
 
 // ============================================================
 // 타입 호환성 매트릭스 (72개 노드 확장, Claude Code 수준 정밀도)
@@ -126,11 +168,12 @@ function formatPortDetailed(port: PortDefinition): string {
 /**
  * 노드에 대한 예시 JSON 생성
  */
-function generateNodeExample(def: NodeDefinition): string {
+function generateNodeExample(def: NodeDefinition | UnifiedToolDefinition): string {
+  const normalized = normalizeDefinition(def)
   const config: Record<string, any> = {}
 
   // 주요 설정 필드에 예시 값 채우기
-  for (const field of def.configSchema.slice(0, 3)) {
+  for (const field of normalized.configSchema.slice(0, 3)) {
     if (field.default !== undefined) {
       config[field.key] = field.default
     } else if (field.type === 'text') {
@@ -145,11 +188,11 @@ function generateNodeExample(def: NodeDefinition): string {
   }
 
   return JSON.stringify({
-    id: `${def.type.replace('.', '_')}_1`,
-    type: def.type,
+    id: `${normalized.type.replace('.', '_')}_1`,
+    type: normalized.type,
     position: { x: 0, y: 0 },
     data: {
-      label: def.meta.label,
+      label: normalized.label,
       config
     }
   }, null, 2)
@@ -158,30 +201,32 @@ function generateNodeExample(def: NodeDefinition): string {
 /**
  * 단일 노드의 완전한 스펙 생성
  */
-function generateNodeSpec(def: NodeDefinition): string {
-  const inputs = def.ports.inputs.length > 0
-    ? def.ports.inputs.map(formatPortDetailed).join('\n')
+function generateNodeSpec(def: NodeDefinition | UnifiedToolDefinition): string {
+  const normalized = normalizeDefinition(def)
+
+  const inputs = normalized.ports.inputs.length > 0
+    ? normalized.ports.inputs.map(formatPortDetailed).join('\n')
     : '    없음'
 
-  const outputs = def.ports.outputs.length > 0
-    ? def.ports.outputs.map(formatPortDetailed).join('\n')
+  const outputs = normalized.ports.outputs.length > 0
+    ? normalized.ports.outputs.map(formatPortDetailed).join('\n')
     : '    없음 (터미널 노드)'
 
-  const configSchema = formatConfigSchema(def.configSchema)
+  const configSchema = formatConfigSchema(normalized.configSchema)
   const example = generateNodeExample(def)
 
   // 이 노드와 연결 가능한 출력 타입
-  const acceptableInputTypes = def.ports.inputs
+  const acceptableInputTypes = normalized.ports.inputs
     .flatMap(p => TYPE_COMPATIBILITY[p.type] || [p.type])
     .filter((v, i, a) => a.indexOf(v) === i)
 
   // 이 노드의 출력과 연결 가능한 입력 타입
-  const providesOutputTypes = def.ports.outputs.map(p => p.type)
+  const providesOutputTypes = normalized.ports.outputs.map(p => p.type)
 
   return `
-#### ${def.meta.label} (\`${def.type}\`)
+#### ${normalized.label} (\`${normalized.type}\`)
 
-**설명**: ${def.meta.description}
+**설명**: ${normalized.description}
 
 **입력 포트**:
 ${inputs}
@@ -901,17 +946,57 @@ const CONNECTION_RULES = `
 
 /**
  * 노드 카탈로그 생성 (카테고리별 그룹화, 상세 스펙)
+ * ToolRegistry와 NodeRegistry 모두에서 정의를 수집합니다.
  */
 export function generateNodeCatalog(): string {
-  const definitions = NodeRegistry.getAll()
-  const categories = NodeRegistry.getCategories()
+  // ToolRegistry에서 통합 도구 정의 가져오기
+  const toolDefinitions = ToolRegistry.getAll()
+  const toolCategories = ToolRegistry.getCategories()
+
+  // NodeRegistry에서 레거시 노드 정의도 가져오기 (호환성)
+  const nodeDefinitions = NodeRegistry.getAll()
+  const nodeCategories = NodeRegistry.getCategories()
+
+  // 카테고리 병합 (ToolRegistry 우선)
+  const allCategories = [...toolCategories]
+  for (const nodeCat of nodeCategories) {
+    if (!allCategories.find(c => c.id === nodeCat.id)) {
+      // NodeCategory를 CategoryDefinition으로 변환 (color 기본값 추가)
+      allCategories.push({
+        id: nodeCat.id as any,
+        label: nodeCat.label,
+        icon: nodeCat.icon,
+        color: (nodeCat as any).color || '#6b7280',
+        order: nodeCat.order ?? 99,
+      })
+    }
+  }
+
+  // 정의 병합 (ToolRegistry 우선, 중복 제거)
+  const seenTypes = new Set<string>()
+  const allDefinitions: (NodeDefinition | UnifiedToolDefinition)[] = []
+
+  for (const tool of toolDefinitions) {
+    if (!seenTypes.has(tool.name)) {
+      seenTypes.add(tool.name)
+      allDefinitions.push(tool)
+    }
+  }
+
+  for (const node of nodeDefinitions) {
+    if (!seenTypes.has(node.type) && !node.type.includes('legacy:')) {
+      seenTypes.add(node.type)
+      allDefinitions.push(node)
+    }
+  }
 
   let catalog = ''
 
-  for (const category of categories) {
-    const categoryNodes = definitions.filter(d =>
-      d.category === category.id && !d.type.includes('legacy:')
-    )
+  for (const category of allCategories) {
+    const categoryNodes = allDefinitions.filter(d => {
+      const normalized = normalizeDefinition(d)
+      return normalized.category === category.id && !normalized.type.includes('legacy:')
+    })
     if (categoryNodes.length === 0) continue
 
     catalog += `\n### ${category.label} (${categoryNodes.length}개 노드)\n`
@@ -926,21 +1011,64 @@ export function generateNodeCatalog(): string {
 
 /**
  * 간략 노드 목록 생성 (빠른 참조용)
+ * ToolRegistry와 NodeRegistry 모두에서 정의를 수집합니다.
  */
 export function generateNodeSummary(): string {
-  const definitions = NodeRegistry.getAll()
-    .filter(d => !d.type.includes('legacy:'))
+  // ToolRegistry에서 통합 도구 정의 가져오기
+  const toolDefinitions = ToolRegistry.getAll()
+  const toolCategories = ToolRegistry.getCategories()
 
-  const categories = NodeRegistry.getCategories()
+  // NodeRegistry에서 레거시 노드 정의도 가져오기
+  const nodeDefinitions = NodeRegistry.getAll()
+  const nodeCategories = NodeRegistry.getCategories()
+
+  // 카테고리 병합
+  const allCategories = [...toolCategories]
+  for (const nodeCat of nodeCategories) {
+    if (!allCategories.find(c => c.id === nodeCat.id)) {
+      // NodeCategory를 CategoryDefinition으로 변환
+      allCategories.push({
+        id: nodeCat.id as any,
+        label: nodeCat.label,
+        icon: nodeCat.icon,
+        color: (nodeCat as any).color || '#6b7280',
+        order: nodeCat.order ?? 99,
+      })
+    }
+  }
+
+  // 정의 병합 (중복 제거)
+  const seenTypes = new Set<string>()
+  const allDefinitions: (NodeDefinition | UnifiedToolDefinition)[] = []
+
+  for (const tool of toolDefinitions) {
+    if (!seenTypes.has(tool.name)) {
+      seenTypes.add(tool.name)
+      allDefinitions.push(tool)
+    }
+  }
+
+  for (const node of nodeDefinitions) {
+    if (!seenTypes.has(node.type) && !node.type.includes('legacy:')) {
+      seenTypes.add(node.type)
+      allDefinitions.push(node)
+    }
+  }
 
   let summary = ''
 
-  for (const category of categories) {
-    const categoryNodes = definitions.filter(d => d.category === category.id)
+  for (const category of allCategories) {
+    const categoryNodes = allDefinitions.filter(d => {
+      const normalized = normalizeDefinition(d)
+      return normalized.category === category.id && !normalized.type.includes('legacy:')
+    })
     if (categoryNodes.length === 0) continue
 
     summary += `**${category.label}**: `
-    summary += categoryNodes.map(d => `\`${d.type}\` (${d.meta.label})`).join(', ')
+    summary += categoryNodes.map(d => {
+      const normalized = normalizeDefinition(d)
+      return `\`${normalized.type}\` (${normalized.label})`
+    }).join(', ')
     summary += '\n'
   }
 
@@ -1351,15 +1479,21 @@ export function validateWorkflowJSON(workflow: any): { valid: boolean; errors: s
     }
     nodeIds.add(node.id)
 
-    // 노드 타입 검증
-    const def = NodeRegistry.get(node.type)
-    if (!def) {
+    // 노드 타입 검증 (ToolRegistry 또는 NodeRegistry에서 조회)
+    const toolDef = ToolRegistry.get(node.type)
+    const nodeDef = NodeRegistry.get(node.type)
+
+    if (!toolDef && !nodeDef) {
       errors.push(`알 수 없는 노드 타입: ${node.type}`)
       continue
     }
 
+    // 정의 정규화
+    const def = toolDef || nodeDef
+    const normalized = normalizeDefinition(def!)
+
     // 필수 설정 검증
-    for (const field of def.configSchema) {
+    for (const field of normalized.configSchema) {
       if (field.required && !node.data?.config?.[field.key]) {
         errors.push(`${node.id}: 필수 설정 누락 - ${field.key}`)
       }

@@ -31,15 +31,22 @@ pub enum CompilerError {
 
 /// Compile a natural-language prompt into an executable WorkflowSpec.
 pub async fn compile(prompt: &str) -> Result<WorkflowSpec, CompilerError> {
-    // Phase 0: stub — returns a minimal empty workflow
+    // Try template-based compilation first
     let task_type = classifier::classify(prompt)?;
     let slots = slot_filler::extract_slots(prompt, &task_type)?;
 
     if let Some(spec) = template::match_template(&task_type, &slots)? {
         let spec = type_checker::check(spec)?;
         let spec = validator_inserter::insert_validators(spec)?;
-        Ok(spec)
-    } else {
-        Err(CompilerError::NoTemplateMatch)
+        return Ok(spec);
     }
+
+    // No template match — use LLM fallback to generate workflow
+    tracing::info!("No template match for prompt, using LLM fallback: {}", &prompt[..prompt.len().min(100)]);
+    let spec = llm_fallback::generate_with_llm(prompt).await?;
+
+    // Run type checking and validation on LLM-generated spec
+    let spec = type_checker::check(spec)?;
+    let spec = validator_inserter::insert_validators(spec)?;
+    Ok(spec)
 }

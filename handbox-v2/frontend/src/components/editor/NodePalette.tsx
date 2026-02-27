@@ -1,9 +1,12 @@
 /**
  * NodePalette — draggable list of available tools organized by category.
+ * Supports both drag-and-drop and double-click to add nodes.
  */
 
 import { useState } from 'react'
 import { toolCategories, type ToolDef } from '@/data/toolCatalog'
+import { useWorkflowStore, type NodeData } from '@/stores/workflowStore'
+import type { Node } from '@xyflow/react'
 import {
   FileText, Save, MessageSquare, Monitor,
   Bot, AlignLeft, Waypoints,
@@ -13,8 +16,10 @@ import {
   HardDrive, SearchCode, ArrowUpDown,
   FileDown, Sheet, CircleDot,
   Brain, Search, Type, Database, Download, FileInput,
-  ChevronDown, ChevronRight, GripVertical,
+  ChevronDown, ChevronRight, GripVertical, Plus,
 } from 'lucide-react'
+
+let nodeIdCounter = 1
 
 const iconMap: Record<string, React.ComponentType<{ size?: number; className?: string; style?: React.CSSProperties }>> = {
   FileText, Save, MessageSquare, Monitor,
@@ -29,19 +34,83 @@ const iconMap: Record<string, React.ComponentType<{ size?: number; className?: s
 
 function ToolItem({ tool, color }: { tool: ToolDef; color: string }) {
   const Icon = iconMap[tool.icon] ?? CircleDot
+  const { setDraggingTool, addNode, nodes } = useWorkflowStore()
 
-  const onDragStart = (e: React.DragEvent) => {
+  const onDragStart = (e: React.DragEvent<HTMLDivElement>) => {
+    console.log('[NodePalette] onDragStart - toolId:', tool.id)
+
+    // Set drag data via dataTransfer API
     e.dataTransfer.setData('application/handbox-tool', tool.id)
+    e.dataTransfer.setData('text/plain', tool.id) // Fallback for compatibility
     e.dataTransfer.effectAllowed = 'move'
+
+    // ALSO set via store for Tauri/WebKit compatibility
+    setDraggingTool(tool.id)
+
+    // Create custom drag image for better visual feedback
+    const dragImage = e.currentTarget.cloneNode(true) as HTMLElement
+    dragImage.style.position = 'absolute'
+    dragImage.style.top = '-1000px'
+    dragImage.style.opacity = '0.8'
+    dragImage.style.background = '#1a1a1a'
+    dragImage.style.borderRadius = '6px'
+    dragImage.style.padding = '8px'
+    document.body.appendChild(dragImage)
+    e.dataTransfer.setDragImage(dragImage, 0, 0)
+
+    // Cleanup drag image after drag ends
+    setTimeout(() => {
+      document.body.removeChild(dragImage)
+    }, 0)
+  }
+
+  const onDragEnd = () => {
+    // Clear dragging state
+    setDraggingTool(null)
+  }
+
+  // Double-click to add node at center of canvas (fallback for drag issues)
+  const onDoubleClick = () => {
+    console.log('[NodePalette] onDoubleClick - adding node:', tool.id)
+
+    // Calculate position based on existing nodes (stagger new nodes)
+    const baseX = 300 + (nodes.length % 5) * 50
+    const baseY = 150 + Math.floor(nodes.length / 5) * 150 + (nodes.length % 5) * 30
+
+    const newNode: Node<NodeData> = {
+      id: `node_${nodeIdCounter++}`,
+      type: 'primitive',
+      position: { x: baseX, y: baseY },
+      data: {
+        label: tool.label,
+        toolRef: tool.id,
+        category: tool.category,
+        config: Object.fromEntries(
+          tool.configFields.map((f) => [f.name, f.default ?? ''])
+        ),
+        inputs: tool.inputs,
+        outputs: tool.outputs,
+      },
+    }
+
+    addNode(newNode)
+  }
+
+  // Single click with + button to add
+  const onClickAdd = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    onDoubleClick()
   }
 
   return (
     <div
-      draggable
+      draggable="true"
       onDragStart={onDragStart}
-      className="flex items-center gap-2 px-2 py-1.5 rounded-md cursor-grab
-                 hover:bg-neutral-800/80 active:cursor-grabbing transition-colors group"
-      title={tool.description}
+      onDragEnd={onDragEnd}
+      onDoubleClick={onDoubleClick}
+      className="flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer
+                 hover:bg-neutral-800/80 active:bg-neutral-700/80 transition-colors group select-none"
+      title={`${tool.description} (더블클릭 또는 + 버튼으로 추가)`}
     >
       <GripVertical size={12} className="text-neutral-700 group-hover:text-neutral-500 shrink-0" />
       <div
@@ -50,7 +119,15 @@ function ToolItem({ tool, color }: { tool: ToolDef; color: string }) {
       >
         <Icon size={12} style={{ color }} />
       </div>
-      <span className="text-xs text-neutral-300 truncate">{tool.label}</span>
+      <span className="text-xs text-neutral-300 truncate flex-1">{tool.label}</span>
+      {/* Quick add button */}
+      <button
+        onClick={onClickAdd}
+        className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-neutral-700 transition-opacity"
+        title="캔버스에 추가"
+      >
+        <Plus size={12} className="text-neutral-400" />
+      </button>
     </div>
   )
 }
@@ -145,6 +222,9 @@ export function NodePalette() {
       <div className="px-3 py-2 border-t border-neutral-800">
         <p className="text-[10px] text-neutral-600 text-center">
           {toolCategories.reduce((a, c) => a + c.tools.length, 0)} tools available
+        </p>
+        <p className="text-[9px] text-neutral-700 text-center mt-1">
+          더블클릭 또는 + 버튼으로 추가
         </p>
       </div>
     </aside>

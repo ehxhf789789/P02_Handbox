@@ -1,124 +1,186 @@
 /**
- * Tier 1 도구 등록 — 모든 내장 도구 노드를 NodeRegistry에 등록
+ * 통합 도구 레지스트리 — 144+ 원자화 도구
  *
- * 72개 노드를 14개 카테고리로 조직:
- * - IO (5): file.read, file.write, file.list, file.info, http.request
- * - Transform (9): json.query, json.parse, json.stringify, csv.parse, csv.stringify,
- *                   text.split, text.regex, text.template, xml.parse
- * - Storage (8): kv.get/set/delete/list, vector.store/search/hybrid, sqlite.query
- * - Doc (2): doc.parse, doc.convert
- * - Process (2): shell.exec, code.eval
- * - Control (10): if, switch, loop, forEach, while, merge, split, gate, variable.get/set
- * - Variable (2): constant, input
- * - Debug (3): log, inspect, breakpoint
- * - Viz (5): table, chart, json, text, stats
- * - LLM (6): llm.chat, llm.embed, llm.structured, prompt.template, prompt.fewshot, prompt.chain
- * - Vision (4): vision.analyze, vision.compare, vision.extract, vision.ocr-advanced
- * - VLM (4): vlm.experiment, vlm.benchmark, vlm.prompt-optimizer, vlm.dataset-builder
- * - Agent (4): agent.react, agent.tool-use, agent.multi, agent.planner
- * - ML (4): ml.classify, ml.cluster, ml.regression, ml.feature-engineering
- * - Export (4): export.docx, export.pptx, export.pdf, export.xlsx
+ * 17개 카테고리:
+ * - file (12): 파일 읽기/쓰기/복사/삭제 등
+ * - text (14): 텍스트 분할/결합/변환 등
+ * - json (10): JSON 파싱/쿼리/변환 등
+ * - csv (6): CSV 파싱/생성/변환 등
+ * - xml (4): XML 파싱/생성/쿼리/변환
+ * - http (8): HTTP 요청/다운로드/업로드
+ * - storage (12): KV 저장소, 벡터 DB, SQLite, S3
+ * - doc (10): 문서 파싱/변환/OCR
+ * - llm (10): LLM 채팅/임베딩/구조화 출력
+ * - prompt (8): 프롬프트 템플릿/Few-shot/체이닝
+ * - rag (8): 문서 인제스트/검색/생성
+ * - vision (8): 이미지 분석/OCR/비교
+ * - agent (8): ReAct/Tool-Use/멀티 에이전트
+ * - control (12): 조건문/반복문/병렬 처리
+ * - variable (6): 변수 관리/상수
+ * - viz (8): 테이블/차트/통계 시각화
+ * - export (10): XLSX/PDF/DOCX/PPTX 생성
  */
 
-import { NodeRegistry } from '../registry/NodeRegistry'
-import type { NodeDefinition } from '../registry/NodeDefinition'
+import { ToolRegistry, TOOL_CATEGORIES } from '../registry/ToolRegistry'
+import type { UnifiedToolDefinition, CategoryDefinition } from '../registry/UnifiedToolDefinition'
 
-import { IO_DEFINITIONS } from './io.tools'
-import { TRANSFORM_DEFINITIONS } from './transform.tools'
-import { STORAGE_DEFINITIONS } from './storage.tools'
-import { DOC_DEFINITIONS } from './doc.tools'
-import { PROCESS_DEFINITIONS } from './process.tools'
-import { CONTROL_DEFINITIONS } from './control.tools'
-import { VARIABLE_DEFINITIONS } from './variable.tools'
-import { DEBUG_DEFINITIONS } from './debug.tools'
-import { VIZ_DEFINITIONS } from './viz.tools'
-import { LLM_DEFINITIONS } from './llm.tools'
-import { VISION_DEFINITIONS } from './vision.tools'
-import { VLM_DEFINITIONS } from './vlm.tools'
-import { AGENT_DEFINITIONS } from './agent.tools'
-import { ML_DEFINITIONS } from './ml.tools'
-import { EXPORT_DEFINITIONS } from './export.tools'
+// ============================================================================
+// 도구 정의 임포트
+// ============================================================================
 
-// ============================================================
-// Tier 1 도구 카테고리 정의
-// ============================================================
+import { FILE_TOOLS } from './file.tools'
+import { TEXT_TOOLS } from './text.tools'
+import { JSON_TOOLS } from './json.tools'
+import { CSV_TOOLS } from './csv.tools'
+import { XML_TOOLS } from './xml.tools'
+import { HTTP_TOOLS } from './http.tools'
+import { STORAGE_TOOLS } from './storage.tools'
+import { DOC_TOOLS } from './doc.tools'
+import { LLM_TOOLS } from './llm.tools'
+import { PROMPT_TOOLS } from './prompt.tools'
+import { RAG_TOOLS } from './rag.tools'
+import { VISION_TOOLS } from './vision.tools'
+import { AGENT_TOOLS } from './agent.tools'
+import { CONTROL_TOOLS } from './control.tools'
+import { VARIABLE_TOOLS } from './variable.tools'
+import { VIZ_TOOLS } from './viz.tools'
+import { EXPORT_TOOLS } from './export.tools'
 
-export const TIER1_CATEGORIES = [
-  // Core Data Pipeline
-  { id: 'io',        label: 'IO',            icon: 'FolderOpen',    order: 10, defaultExpanded: true },
-  { id: 'transform', label: 'Transform',     icon: 'Transform',     order: 11, defaultExpanded: true },
-  { id: 'storage',   label: 'Storage',       icon: 'Storage',       order: 12, defaultExpanded: true },
-  { id: 'doc',       label: 'Document',      icon: 'Description',   order: 13, defaultExpanded: true },
-  { id: 'process',   label: 'Process',       icon: 'Terminal',      order: 14, defaultExpanded: false },
-  { id: 'control',   label: 'Control',       icon: 'AccountTree',   order: 15, defaultExpanded: true },
-  { id: 'data',      label: 'Data',          icon: 'DataObject',    order: 16, defaultExpanded: true },
-  { id: 'debug',     label: 'Debug',         icon: 'BugReport',     order: 17, defaultExpanded: false },
-  { id: 'viz',       label: 'Visualization', icon: 'BarChart',      order: 18, defaultExpanded: true },
+// ============================================================================
+// 전체 도구 목록
+// ============================================================================
+
+export const ALL_TOOLS: UnifiedToolDefinition[] = [
+  ...FILE_TOOLS,       // 12개
+  ...TEXT_TOOLS,       // 14개
+  ...JSON_TOOLS,       // 10개
+  ...CSV_TOOLS,        // 6개
+  ...XML_TOOLS,        // 4개
+  ...HTTP_TOOLS,       // 8개
+  ...STORAGE_TOOLS,    // 12개
+  ...DOC_TOOLS,        // 10개
+  ...LLM_TOOLS,        // 10개
+  ...PROMPT_TOOLS,     // 8개
+  ...RAG_TOOLS,        // 8개
+  ...VISION_TOOLS,     // 8개
+  ...AGENT_TOOLS,      // 8개
+  ...CONTROL_TOOLS,    // 12개
+  ...VARIABLE_TOOLS,   // 6개
+  ...VIZ_TOOLS,        // 8개
+  ...EXPORT_TOOLS,     // 10개
+]
+
+// ============================================================================
+// 카테고리 정의
+// ============================================================================
+
+export const UNIFIED_CATEGORIES: CategoryDefinition[] = [
+  // Core Data
+  { id: 'file', label: '파일', icon: 'FolderOpen', color: '#3b82f6', order: 10 },
+  { id: 'text', label: '텍스트', icon: 'TextFields', color: '#10b981', order: 11 },
+  { id: 'json', label: 'JSON', icon: 'DataObject', color: '#f59e0b', order: 12 },
+  { id: 'csv', label: 'CSV', icon: 'TableChart', color: '#22c55e', order: 13 },
+  { id: 'xml', label: 'XML', icon: 'Code', color: '#f97316', order: 14 },
+  { id: 'http', label: 'HTTP', icon: 'Http', color: '#06b6d4', order: 15 },
+  { id: 'storage', label: '저장소', icon: 'Storage', color: '#f59e0b', order: 16 },
+  { id: 'doc', label: '문서', icon: 'Description', color: '#10b981', order: 17 },
+
   // AI & ML
-  { id: 'llm',       label: 'LLM',           icon: 'Psychology',    order: 19, defaultExpanded: true },
-  { id: 'ai',        label: 'AI/Vision/Agent', icon: 'AutoAwesome', order: 20, defaultExpanded: true },
-  // Export
-  { id: 'export',    label: 'Export',        icon: 'Download',      order: 21, defaultExpanded: true },
+  { id: 'llm', label: 'LLM', icon: 'Psychology', color: '#8b5cf6', order: 20 },
+  { id: 'prompt', label: '프롬프트', icon: 'EditNote', color: '#a855f7', order: 21 },
+  { id: 'rag', label: 'RAG', icon: 'AutoAwesome', color: '#06b6d4', order: 22 },
+  { id: 'vision', label: '비전', icon: 'ImageSearch', color: '#8b5cf6', order: 23 },
+  { id: 'agent', label: '에이전트', icon: 'SmartToy', color: '#f97316', order: 24 },
+
+  // Control Flow
+  { id: 'control', label: '제어', icon: 'AccountTree', color: '#64748b', order: 30 },
+  { id: 'variable', label: '변수', icon: 'DataObject', color: '#64748b', order: 31 },
+
+  // Output
+  { id: 'viz', label: '시각화', icon: 'BarChart', color: '#ec4899', order: 40 },
+  { id: 'export', label: '내보내기', icon: 'Download', color: '#16a34a', order: 41 },
 ]
 
-// ============================================================
-// 전체 도구 정의 목록
-// ============================================================
-
-export const TIER1_DEFINITIONS: NodeDefinition[] = [
-  ...IO_DEFINITIONS,
-  ...TRANSFORM_DEFINITIONS,
-  ...STORAGE_DEFINITIONS,
-  ...DOC_DEFINITIONS,
-  ...PROCESS_DEFINITIONS,
-  ...CONTROL_DEFINITIONS,
-  ...VARIABLE_DEFINITIONS,
-  ...DEBUG_DEFINITIONS,
-  ...VIZ_DEFINITIONS,
-  ...LLM_DEFINITIONS,
-  ...VISION_DEFINITIONS,
-  ...VLM_DEFINITIONS,
-  ...AGENT_DEFINITIONS,
-  ...ML_DEFINITIONS,
-  ...EXPORT_DEFINITIONS,
-]
-
-// ============================================================
+// ============================================================================
 // 등록 함수
-// ============================================================
+// ============================================================================
+
+let _initialized = false
 
 /**
- * 모든 Tier 1 도구를 NodeRegistry에 등록합니다.
- * main.tsx의 초기화 과정에서 호출됩니다.
+ * 모든 도구를 ToolRegistry에 등록합니다.
+ * main.tsx의 초기화 과정에서 한 번만 호출됩니다.
  */
-export function registerAllTools(): void {
-  // 카테고리 등록
-  for (const category of TIER1_CATEGORIES) {
-    NodeRegistry.registerCategory(category)
+export function initializeTools(): void {
+  if (_initialized) {
+    console.log('[Tools] 이미 초기화됨')
+    return
   }
 
-  // 도구 노드 등록
-  NodeRegistry.registerAll(TIER1_DEFINITIONS)
+  // 카테고리 등록
+  for (const category of UNIFIED_CATEGORIES) {
+    ToolRegistry.registerCategory(category)
+  }
 
-  console.log(`[Tools] Tier 1 도구 ${TIER1_DEFINITIONS.length}개 등록 완료 (${TIER1_CATEGORIES.length}개 카테고리)`)
+  // 도구 등록
+  ToolRegistry.registerAll(ALL_TOOLS)
+
+  // 레거시 별칭 등록
+  import('../registry/legacyAliases').then(({ registerLegacyAliases }) => {
+    registerLegacyAliases()
+  })
+
+  _initialized = true
+
+  console.log(`[Tools] 초기화 완료: ${ALL_TOOLS.length}개 도구, ${UNIFIED_CATEGORIES.length}개 카테고리`)
 }
 
-// ============================================================
-// Re-exports
-// ============================================================
+/**
+ * 도구 수 통계를 반환합니다.
+ */
+export function getToolStats(): { total: number; byCategory: Record<string, number> } {
+  const byCategory: Record<string, number> = {}
+  for (const tool of ALL_TOOLS) {
+    const cat = tool.meta.category
+    byCategory[cat] = (byCategory[cat] || 0) + 1
+  }
+  return { total: ALL_TOOLS.length, byCategory }
+}
 
-export { IO_DEFINITIONS } from './io.tools'
-export { TRANSFORM_DEFINITIONS } from './transform.tools'
-export { STORAGE_DEFINITIONS } from './storage.tools'
-export { DOC_DEFINITIONS } from './doc.tools'
-export { PROCESS_DEFINITIONS } from './process.tools'
-export { CONTROL_DEFINITIONS } from './control.tools'
-export { VARIABLE_DEFINITIONS } from './variable.tools'
-export { DEBUG_DEFINITIONS } from './debug.tools'
-export { VIZ_DEFINITIONS } from './viz.tools'
-export { LLM_DEFINITIONS } from './llm.tools'
-export { VISION_DEFINITIONS } from './vision.tools'
-export { VLM_DEFINITIONS } from './vlm.tools'
-export { AGENT_DEFINITIONS } from './agent.tools'
-export { ML_DEFINITIONS } from './ml.tools'
-export { EXPORT_DEFINITIONS } from './export.tools'
+// ============================================================================
+// Re-exports
+// ============================================================================
+
+export { FILE_TOOLS } from './file.tools'
+export { TEXT_TOOLS } from './text.tools'
+export { JSON_TOOLS } from './json.tools'
+export { CSV_TOOLS } from './csv.tools'
+export { XML_TOOLS } from './xml.tools'
+export { HTTP_TOOLS } from './http.tools'
+export { STORAGE_TOOLS } from './storage.tools'
+export { DOC_TOOLS } from './doc.tools'
+export { LLM_TOOLS } from './llm.tools'
+export { PROMPT_TOOLS } from './prompt.tools'
+export { RAG_TOOLS } from './rag.tools'
+export { VISION_TOOLS } from './vision.tools'
+export { AGENT_TOOLS } from './agent.tools'
+export { CONTROL_TOOLS } from './control.tools'
+export { VARIABLE_TOOLS } from './variable.tools'
+export { VIZ_TOOLS } from './viz.tools'
+export { EXPORT_TOOLS } from './export.tools'
+
+// Legacy compatibility exports
+export { STORAGE_TOOLS as STORAGE_DEFINITIONS } from './storage.tools'
+export { DOC_TOOLS as DOC_DEFINITIONS } from './doc.tools'
+export { VARIABLE_TOOLS as VARIABLE_DEFINITIONS } from './variable.tools'
+export { EXPORT_TOOLS as EXPORT_DEFINITIONS } from './export.tools'
+export { VIZ_TOOLS as VIZ_DEFINITIONS } from './viz.tools'
+export { VISION_TOOLS as VISION_DEFINITIONS } from './vision.tools'
+export { AGENT_TOOLS as AGENT_DEFINITIONS } from './agent.tools'
+export { CONTROL_TOOLS as CONTROL_DEFINITIONS } from './control.tools'
+export { LLM_TOOLS as LLM_DEFINITIONS } from './llm.tools'
+
+// Legacy TIER1 compatibility
+export const TIER1_DEFINITIONS = ALL_TOOLS
+export const TIER1_CATEGORIES = UNIFIED_CATEGORIES
+export const registerAllTools = initializeTools
