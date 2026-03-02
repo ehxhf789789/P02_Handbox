@@ -16,6 +16,7 @@ import {
   HardDrive, SearchCode, ArrowUpDown,
   FileDown, Sheet, CircleDot,
   Brain, Search, Type, Database, Download, FileInput,
+  Sparkles, Terminal, Globe,
   ChevronDown, ChevronRight, GripVertical, Plus,
 } from 'lucide-react'
 
@@ -30,6 +31,7 @@ const iconMap: Record<string, React.ComponentType<{ size?: number; className?: s
   HardDrive, SearchCode, ArrowUpDown,
   FileDown, Sheet, CircleDot,
   Brain, Search, Type, Database, Download, FileInput,
+  Sparkles, Terminal, Globe,
 }
 
 function ToolItem({ tool, color }: { tool: ToolDef; color: string }) {

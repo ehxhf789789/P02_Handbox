@@ -57,3 +57,24 @@
 .react-flow__node:focus {
   outline: none !important;
 }
+
+/* Data flow edge animation — pulsing dash for active edges */
+@keyframes edgeFlowPulse {
+  0% { stroke-dashoffset: 24; }
+  100% { stroke-dashoffset: 0; }
+}
+
+.react-flow__edge.animated path {
+  animation: edgeFlowPulse 1s linear infinite;
+}
+
+/* Agent highlight glow on nodes */
+@keyframes agentHighlight {
+  0%, 100% { box-shadow: 0 0 8px rgba(139, 92, 246, 0.4); }
+  50% { box-shadow: 0 0 20px rgba(139, 92, 246, 0.8), 0 0 40px rgba(139, 92, 246, 0.3); }
+}
+
+.agent-highlight-node {
+  animation: agentHighlight 1.5s ease-in-out infinite;
+  border-color: #8b5cf6 !important;
+}

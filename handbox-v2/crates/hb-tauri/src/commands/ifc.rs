@@ -372,8 +372,257 @@ pub async fn ifc_export_elements_csv(
 }
 
 // ============================================================================
+// Commands - Modification
+// ============================================================================
+
+/// Modify attributes of an existing entity
+#[command]
+pub async fn ifc_modify_entity(
+    mut model: IfcModel,
+    entity_id: String,
+    updates: HashMap<String, serde_json::Value>,
+) -> Result<IfcModel, String> {
+    let entity = model.entities.get_mut(&entity_id)
+        .ok_or_else(|| format!("Entity not found: {}", entity_id))?;
+
+    for (key, value) in &updates {
+        match key.as_str() {
+            "Name" => entity.name = value.as_str().map(String::from),
+            "Description" => entity.description = value.as_str().map(String::from),
+            "GlobalId" => entity.global_id = value.as_str().map(String::from),
+            _ => { entity.attributes.insert(key.clone(), value.clone()); }
+        }
+    }
+
+    Ok(model)
+}
+
+/// Add a new entity to the model
+#[command]
+pub async fn ifc_add_entity(
+    mut model: IfcModel,
+    entity_type: String,
+    name: Option<String>,
+    description: Option<String>,
+    attributes: Option<HashMap<String, serde_json::Value>>,
+) -> Result<IfcModel, String> {
+    // Generate a new entity ID (find max existing + 1)
+    let max_id = model.entities.values()
+        .map(|e| e.id)
+        .max()
+        .unwrap_or(0);
+    let new_id = max_id + 1;
+
+    let entity = IfcEntity {
+        id: new_id,
+        entity_type: entity_type.clone(),
+        global_id: Some(generate_ifc_guid()),
+        name,
+        description,
+        attributes: attributes.unwrap_or_default(),
+    };
+
+    model.entities.insert(format!("#{}", new_id), entity);
+    model.entity_count = model.entities.len();
+
+    Ok(model)
+}
+
+/// Remove an entity from the model
+#[command]
+pub async fn ifc_remove_entity(
+    mut model: IfcModel,
+    entity_id: String,
+) -> Result<IfcModel, String> {
+    model.entities.remove(&entity_id)
+        .ok_or_else(|| format!("Entity not found: {}", entity_id))?;
+    model.entity_count = model.entities.len();
+
+    Ok(model)
+}
+
+/// Clone an entity (duplicate with new ID and GlobalId)
+#[command]
+pub async fn ifc_clone_entity(
+    mut model: IfcModel,
+    entity_id: String,
+    new_name: Option<String>,
+) -> Result<IfcModel, String> {
+    let source = model.entities.get(&entity_id)
+        .ok_or_else(|| format!("Entity not found: {}", entity_id))?
+        .clone();
+
+    let max_id = model.entities.values()
+        .map(|e| e.id)
+        .max()
+        .unwrap_or(0);
+    let new_id = max_id + 1;
+
+    let new_entity = IfcEntity {
+        id: new_id,
+        entity_type: source.entity_type,
+        global_id: Some(generate_ifc_guid()),
+        name: new_name.or(source.name.map(|n| format!("{} (copy)", n))),
+        description: source.description,
+        attributes: source.attributes,
+    };
+
+    model.entities.insert(format!("#{}", new_id), new_entity);
+    model.entity_count = model.entities.len();
+
+    Ok(model)
+}
+
+// ============================================================================
+// Commands - Write
+// ============================================================================
+
+/// Write IFC model back to STEP format file
+#[command]
+pub async fn ifc_write_file(
+    model: IfcModel,
+    output_path: String,
+) -> Result<String, String> {
+    let content = serialize_ifc_model(&model)?;
+
+    std::fs::write(&output_path, &content)
+        .map_err(|e| format!("Failed to write file: {}", e))?;
+
+    Ok(format!("Wrote IFC file ({} entities, {} bytes) to {}",
+        model.entity_count, content.len(), output_path))
+}
+
+/// Merge two IFC models
+#[command]
+pub async fn ifc_merge_models(
+    mut base_model: IfcModel,
+    merge_model: IfcModel,
+) -> Result<IfcModel, String> {
+    // Find max ID in base model
+    let max_id = base_model.entities.values()
+        .map(|e| e.id)
+        .max()
+        .unwrap_or(0);
+
+    // Add entities from merge model with offset IDs
+    let mut offset = 0u64;
+    for (_, entity) in &merge_model.entities {
+        offset += 1;
+        let new_id = max_id + offset;
+        let mut new_entity = entity.clone();
+        new_entity.id = new_id;
+        // Generate new GlobalId to avoid conflicts
+        new_entity.global_id = Some(generate_ifc_guid());
+        base_model.entities.insert(format!("#{}", new_id), new_entity);
+    }
+
+    base_model.entity_count = base_model.entities.len();
+
+    Ok(base_model)
+}
+
+// ============================================================================
 // Helper Functions
 // ============================================================================
+
+/// Generate a 22-character IFC GUID (base64-like encoding)
+fn generate_ifc_guid() -> String {
+    let uuid = uuid::Uuid::new_v4();
+    let bytes = uuid.as_bytes();
+
+    // IFC uses a custom base64 encoding for 22-char GUIDs
+    const CHARS: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$";
+    let mut result = String::with_capacity(22);
+
+    // Encode 16 bytes into 22 base64 characters (6 bits per char)
+    let mut bits: u128 = 0;
+    for b in bytes {
+        bits = (bits << 8) | (*b as u128);
+    }
+
+    for _ in 0..22 {
+        let idx = (bits & 0x3F) as usize;
+        result.push(CHARS[idx] as char);
+        bits >>= 6;
+    }
+
+    result
+}
+
+/// Serialize IFC model to STEP format string
+fn serialize_ifc_model(model: &IfcModel) -> Result<String, String> {
+    let mut output = String::new();
+
+    // HEADER
+    output.push_str("ISO-10303-21;\nHEADER;\n");
+    output.push_str(&format!("FILE_DESCRIPTION(('{}'), '2;1');\n",
+        model.file_description.as_deref().unwrap_or("Handbox Generated")));
+    output.push_str(&format!("FILE_NAME('{}', '{}', (''), (''), '', 'Handbox v2', '');\n",
+        model.file_name.as_deref().unwrap_or("output.ifc"),
+        chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S")));
+    output.push_str(&format!("FILE_SCHEMA(('{}'));\n", model.schema));
+    output.push_str("ENDSEC;\n\n");
+
+    // DATA
+    output.push_str("DATA;\n");
+
+    // Sort entities by ID for consistent output
+    let mut entities: Vec<(&String, &IfcEntity)> = model.entities.iter().collect();
+    entities.sort_by_key(|(_, e)| e.id);
+
+    for (_, entity) in &entities {
+        let mut params = Vec::new();
+
+        // GlobalId
+        if let Some(ref gid) = entity.global_id {
+            params.push(format!("'{}'", gid));
+        } else {
+            params.push("$".to_string());
+        }
+
+        // OwnerHistory (placeholder)
+        params.push("$".to_string());
+
+        // Name
+        if let Some(ref name) = entity.name {
+            params.push(format!("'{}'", name.replace('\'', "''")));
+        } else {
+            params.push("$".to_string());
+        }
+
+        // Description
+        if let Some(ref desc) = entity.description {
+            params.push(format!("'{}'", desc.replace('\'', "''")));
+        } else {
+            params.push("$".to_string());
+        }
+
+        // Additional attributes
+        for (key, value) in &entity.attributes {
+            if ["Name", "Description", "GlobalId"].contains(&key.as_str()) {
+                continue;
+            }
+            match value {
+                serde_json::Value::String(s) => params.push(format!("'{}'", s)),
+                serde_json::Value::Number(n) => params.push(n.to_string()),
+                serde_json::Value::Bool(b) => params.push(if *b { ".T.".to_string() } else { ".F.".to_string() }),
+                serde_json::Value::Null => params.push("$".to_string()),
+                other => params.push(format!("'{}'", other)),
+            }
+        }
+
+        output.push_str(&format!("#{}={}({});\n",
+            entity.id,
+            entity.entity_type,
+            params.join(",")
+        ));
+    }
+
+    output.push_str("ENDSEC;\n");
+    output.push_str("END-ISO-10303-21;\n");
+
+    Ok(output)
+}
 
 fn parse_ifc_content(content: &str) -> Result<IfcModel, String> {
     let mut model = IfcModel {

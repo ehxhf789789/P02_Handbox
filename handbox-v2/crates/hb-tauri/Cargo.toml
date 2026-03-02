@@ -32,6 +32,7 @@ base64 = { workspace = true }
 dirs = { workspace = true }
 url = { workspace = true }
 urlencoding = { workspace = true }
+regex-lite = "0.1"
 tauri = { version = "2", features = ["devtools"] }
 tauri-plugin-dialog = "2"
 tauri-build = { version = "2", features = [] }

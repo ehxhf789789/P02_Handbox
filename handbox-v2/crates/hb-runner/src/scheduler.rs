@@ -13,6 +13,8 @@ use hb_core::trace::{ExecutionEnvironment, ExecutionRecord, ExecutionStatus, Nod
 use hb_mcp::McpClient;
 use hb_tool_executor::{execute, ToolInput};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -34,6 +36,24 @@ pub struct NodeStatusEvent {
 /// Callback type for status updates.
 pub type StatusCallback = Arc<dyn Fn(NodeStatusEvent) + Send + Sync>;
 
+/// Parameters for agent task execution.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AgentTaskParams {
+    pub node_id: String,
+    pub prompt: String,
+    pub context: serde_json::Value,
+    pub max_iterations: Option<usize>,
+    pub mode: Option<String>,
+}
+
+/// Callback for executing agent-task nodes in the workflow DAG.
+/// Injected by the Tauri layer to bridge `hb-runner` → `agent_loop`.
+pub type AgentTaskExecutor = Arc<
+    dyn Fn(AgentTaskParams) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, String>> + Send>>
+        + Send
+        + Sync,
+>;
+
 /// Execution context with optional features (Clone-able via Arc).
 #[derive(Clone)]
 pub struct ExecutionContext {
@@ -43,6 +63,10 @@ pub struct ExecutionContext {
     pub cancelled: Arc<std::sync::atomic::AtomicBool>,
     /// If true, stop execution immediately when any node fails.
     pub fail_fast: bool,
+    /// Optional executor for agent-task nodes. Without this, agent-task returns a stub.
+    pub agent_executor: Option<AgentTaskExecutor>,
+    /// Optional trace store for persisting NodeSpan records.
+    pub trace_store: Option<Arc<hb_trace::store::TraceStore>>,
 }
 
 impl Default for ExecutionContext {
@@ -53,6 +77,8 @@ impl Default for ExecutionContext {
             status_callback: None,
             cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             fail_fast: true, // Default to stopping on first error
+            agent_executor: None,
+            trace_store: None,
         }
     }
 }
@@ -81,9 +107,36 @@ impl ExecutionContext {
         self
     }
 
+    /// Set the agent task executor for running agent-task nodes in the DAG.
+    pub fn with_agent_executor<F>(mut self, executor: F) -> Self
+    where
+        F: Fn(AgentTaskParams) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, String>> + Send>>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.agent_executor = Some(Arc::new(executor));
+        self
+    }
+
+    /// Set the trace store for persisting execution spans.
+    pub fn with_trace_store(mut self, store: Arc<hb_trace::store::TraceStore>) -> Self {
+        self.trace_store = Some(store);
+        self
+    }
+
     fn emit_status(&self, event: NodeStatusEvent) {
         if let Some(cb) = &self.status_callback {
             cb(event);
+        }
+    }
+
+    /// Record a span to the trace store (if configured). Non-blocking — logs errors.
+    fn record_span(&self, span: &NodeSpan) {
+        if let Some(ref store) = self.trace_store {
+            if let Err(e) = store.insert_span(span) {
+                tracing::warn!("Failed to record trace span {}: {e}", span.span_id);
+            }
         }
     }
 }
@@ -221,6 +274,8 @@ pub async fn run_dag_with_context(
                 Ok(Ok((span, output))) => {
                     let nid = &level[i];
                     node_outputs.insert(nid.clone(), output);
+                    // Record span to trace store
+                    ctx.record_span(&span);
                     match span.status {
                         ExecutionStatus::Completed => completed_nodes += 1,
                         ExecutionStatus::CacheHit => {
@@ -398,7 +453,9 @@ async fn execute_primitive_node(
     let mut last_error: String;
 
     loop {
-        let (output, status, error, duration_ms) = if tool_ref.starts_with("mcp://") {
+        let (output, status, error, duration_ms) = if tool_ref == "agent-task" {
+            execute_agent_task(node_id, &input_json, &config_json, &ctx).await
+        } else if tool_ref.starts_with("mcp://") {
             execute_mcp_tool(tool_ref, &input_json, &config_json, ctx.mcp_cache.clone()).await
         } else {
             execute_native_tool(tool_ref, &input_json, &config_json).await
@@ -803,6 +860,73 @@ fn evaluate_condition(expr: &str, input: &serde_json::Value) -> Option<serde_jso
     serde_json::from_str(expr).ok()
 }
 
+/// Execute an agent-task node via the injected AgentTaskExecutor callback.
+async fn execute_agent_task(
+    node_id: &str,
+    input_json: &serde_json::Value,
+    config_json: &serde_json::Value,
+    ctx: &Arc<ExecutionContext>,
+) -> (serde_json::Value, ExecutionStatus, Option<String>, i64) {
+    let start = std::time::Instant::now();
+
+    let executor = match &ctx.agent_executor {
+        Some(exec) => exec.clone(),
+        None => {
+            tracing::warn!("Agent task node '{node_id}' skipped — no executor configured");
+            return (
+                serde_json::json!({
+                    "result": null,
+                    "skipped": true,
+                    "reason": "Agent task executor not configured. Use execute_agent_node command or provide agent_executor in ExecutionContext."
+                }),
+                ExecutionStatus::Skipped,
+                Some("Agent task executor not configured".into()),
+                0,
+            );
+        }
+    };
+
+    // Extract prompt from config, context from input
+    let prompt = config_json
+        .get("prompt")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Execute the task based on the provided context.")
+        .to_string();
+    let max_iterations = config_json
+        .get("max_iterations")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize);
+    let mode = config_json
+        .get("mode")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let params = AgentTaskParams {
+        node_id: node_id.to_string(),
+        prompt,
+        context: input_json.clone(),
+        max_iterations,
+        mode,
+    };
+
+    match executor(params).await {
+        Ok(output) => {
+            let duration_ms = start.elapsed().as_millis() as i64;
+            (output, ExecutionStatus::Completed, None, duration_ms)
+        }
+        Err(e) => {
+            let err_msg = format!("Agent task failed: {e}");
+            tracing::error!("{err_msg}");
+            (
+                serde_json::json!({ "error": err_msg }),
+                ExecutionStatus::Failed,
+                Some(err_msg),
+                start.elapsed().as_millis() as i64,
+            )
+        }
+    }
+}
+
 /// Execute a tool via Native runtime (hb-tool-executor).
 async fn execute_native_tool(
     tool_ref: &str,
@@ -1103,5 +1227,167 @@ mod tests {
         assert_eq!(record.completed_nodes, 3);
         assert_eq!(record.failed_nodes, 0);
         assert_eq!(record.status, ExecutionStatus::Completed);
+    }
+
+    #[tokio::test]
+    async fn agent_task_node_with_executor() {
+        let mut config = serde_json::Map::new();
+        config.insert("prompt".into(), serde_json::json!("Analyze this data"));
+        config.insert("max_iterations".into(), serde_json::json!(5));
+        config.insert("mode".into(), serde_json::json!("auto"));
+
+        let spec = WorkflowSpec {
+            nodes: vec![NodeEntry::Primitive(NodeSpec {
+                id: "agent1".into(),
+                tool_ref: "agent-task".into(),
+                config,
+                position: None,
+                label: Some("Agent Node".into()),
+                disabled: false,
+                retry: None,
+                cache: None,
+            })],
+            edges: vec![],
+            ..Default::default()
+        };
+
+        // Inject a mock agent executor
+        let ctx = ExecutionContext::default().with_agent_executor(|params: AgentTaskParams| {
+            Box::pin(async move {
+                assert_eq!(params.prompt, "Analyze this data");
+                assert_eq!(params.max_iterations, Some(5));
+                assert_eq!(params.mode, Some("auto".to_string()));
+                Ok(serde_json::json!({
+                    "result": "Analysis complete",
+                    "steps": ["step1", "step2"],
+                }))
+            })
+        });
+
+        let record = run_dag_with_context(Uuid::new_v4(), &spec, ctx)
+            .await
+            .unwrap();
+        assert_eq!(record.total_nodes, 1);
+        assert_eq!(record.completed_nodes, 1);
+        assert_eq!(record.failed_nodes, 0);
+        assert_eq!(record.status, ExecutionStatus::Completed);
+    }
+
+    #[tokio::test]
+    async fn agent_task_node_without_executor_returns_stub() {
+        let mut config = serde_json::Map::new();
+        config.insert("prompt".into(), serde_json::json!("Do something"));
+
+        let spec = WorkflowSpec {
+            nodes: vec![NodeEntry::Primitive(NodeSpec {
+                id: "agent2".into(),
+                tool_ref: "agent-task".into(),
+                config,
+                position: None,
+                label: None,
+                disabled: false,
+                retry: None,
+                cache: None,
+            })],
+            edges: vec![],
+            ..Default::default()
+        };
+
+        // No agent_executor — should return Skipped (counted as failed for fail-fast)
+        let ctx = ExecutionContext::default().with_fail_fast(false);
+        let record = run_dag_with_context(Uuid::new_v4(), &spec, ctx).await.unwrap();
+        assert_eq!(record.completed_nodes, 0);
+        assert_eq!(record.failed_nodes, 1);
+    }
+
+    #[tokio::test]
+    async fn agent_task_node_failure_propagates() {
+        let spec = WorkflowSpec {
+            nodes: vec![NodeEntry::Primitive(NodeSpec {
+                id: "agent3".into(),
+                tool_ref: "agent-task".into(),
+                config: Default::default(),
+                position: None,
+                label: None,
+                disabled: false,
+                retry: None,
+                cache: None,
+            })],
+            edges: vec![],
+            ..Default::default()
+        };
+
+        let ctx = ExecutionContext::default().with_agent_executor(|_params| {
+            Box::pin(async move { Err("LLM connection failed".to_string()) })
+        });
+
+        let record = run_dag_with_context(Uuid::new_v4(), &spec, ctx)
+            .await
+            .unwrap();
+        assert_eq!(record.completed_nodes, 0);
+        assert_eq!(record.failed_nodes, 1);
+        assert_eq!(record.status, ExecutionStatus::Failed);
+    }
+
+    #[tokio::test]
+    async fn agent_task_receives_upstream_input() {
+        let spec = WorkflowSpec {
+            nodes: vec![
+                NodeEntry::Primitive(NodeSpec {
+                    id: "reader".into(),
+                    tool_ref: "display-output".into(),
+                    config: Default::default(),
+                    position: None,
+                    label: None,
+                    disabled: false,
+                    retry: None,
+                    cache: None,
+                }),
+                NodeEntry::Primitive(NodeSpec {
+                    id: "agent4".into(),
+                    tool_ref: "agent-task".into(),
+                    config: {
+                        let mut m = serde_json::Map::new();
+                        m.insert("prompt".into(), serde_json::json!("Summarize"));
+                        m
+                    },
+                    position: None,
+                    label: None,
+                    disabled: false,
+                    retry: None,
+                    cache: None,
+                }),
+            ],
+            edges: vec![EdgeSpec {
+                id: "e1".into(),
+                source_node: "reader".into(),
+                source_port: "output".into(),
+                target_node: "agent4".into(),
+                target_port: "context".into(),
+                kind: EdgeKind::Data,
+                transform: None,
+            }],
+            ..Default::default()
+        };
+
+        let received_context = Arc::new(Mutex::new(serde_json::Value::Null));
+        let ctx_clone = received_context.clone();
+
+        let ctx = ExecutionContext::default().with_agent_executor(move |params: AgentTaskParams| {
+            let ctx_clone = ctx_clone.clone();
+            Box::pin(async move {
+                *ctx_clone.lock().await = params.context.clone();
+                Ok(serde_json::json!({ "result": "done" }))
+            })
+        });
+
+        let record = run_dag_with_context(Uuid::new_v4(), &spec, ctx)
+            .await
+            .unwrap();
+        assert_eq!(record.completed_nodes, 2);
+
+        // Verify agent received upstream context
+        let ctx_val = received_context.lock().await;
+        assert!(ctx_val.is_object(), "Agent should receive upstream data as context");
     }
 }

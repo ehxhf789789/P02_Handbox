@@ -49,12 +49,61 @@ pub async fn get_pack(
     serde_json::from_str(&content).map_err(|e| e.to_string())
 }
 
+/// Install a pack from a local directory path.
+/// Copies the pack directory to the packs/ folder.
 #[tauri::command]
 pub async fn install_pack(
-    _pack_id: String,
+    source_path: String,
     _version: String,
-    _state: State<'_, AppState>,
+    state: State<'_, AppState>,
 ) -> Result<(), String> {
-    // Phase 3: Download and install pack from registry
-    Err("Pack installation from remote registry not yet implemented. Copy pack directory to the packs/ folder.".into())
+    let source = std::path::Path::new(&source_path);
+    if !source.exists() {
+        return Err(format!("Source path does not exist: {source_path}"));
+    }
+
+    // Validate that source has a manifest.json
+    let manifest_path = source.join("manifest.json");
+    if !manifest_path.exists() {
+        return Err("Source directory does not contain a manifest.json".into());
+    }
+
+    // Read pack_id from manifest
+    let manifest_content = std::fs::read_to_string(&manifest_path).map_err(|e| e.to_string())?;
+    let manifest: serde_json::Value =
+        serde_json::from_str(&manifest_content).map_err(|e| format!("Invalid manifest: {e}"))?;
+    let pack_id = manifest
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or("Manifest missing 'id' field")?;
+
+    // Copy to packs directory
+    let packs_dir = state.data_dir.parent().unwrap_or(&state.data_dir).join("packs");
+    let target = packs_dir.join(pack_id);
+
+    if target.exists() {
+        std::fs::remove_dir_all(&target).map_err(|e| format!("Failed to remove existing pack: {e}"))?;
+    }
+    std::fs::create_dir_all(&target).map_err(|e| format!("Failed to create pack dir: {e}"))?;
+
+    // Recursively copy files
+    copy_dir_recursive(source, &target).map_err(|e| format!("Failed to copy pack: {e}"))?;
+
+    tracing::info!("Installed pack '{pack_id}' from {source_path}");
+    Ok(())
+}
+
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path)?;
+        }
+    }
+    Ok(())
 }

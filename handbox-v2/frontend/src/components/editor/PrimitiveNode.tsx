@@ -18,6 +18,7 @@ import {
   HardDrive, SearchCode, ArrowUpDown,
   FileDown, Sheet, CircleDot,
   Brain, Search, Type, Database, Download, FileInput,
+  Sparkles, Terminal, Globe,
   CheckCircle2, XCircle, Loader2, Clock,
 } from 'lucide-react'
 
@@ -30,6 +31,7 @@ const iconMap: Record<string, React.ComponentType<{ size?: number; className?: s
   HardDrive, SearchCode, ArrowUpDown,
   FileDown, Sheet, CircleDot,
   Brain, Search, Type, Database, Download, FileInput,
+  Sparkles, Terminal, Globe,
 }
 
 // Execution status styling
@@ -92,16 +94,28 @@ function PrimitiveNodeInner({ id, data, selected }: NodeProps) {
   const selectNode = useWorkflowStore((s) => s.selectNode)
   const currentExecution = useExecutionStore((s) => s.currentExecution)
   const rawNodeStatus = useExecutionStore((s) => s.nodeStatuses[id])
+  const agentHighlightNodeId = useExecutionStore((s) => s.agentHighlightNodeId)
   const toolDef = allTools.find((t) => t.id === nodeData.toolRef)
   const IconComp = iconMap[toolDef?.icon ?? ''] ?? CircleDot
 
   // Only show execution status if there's an active execution
   const nodeStatus = currentExecution ? rawNodeStatus : undefined
 
+  // Agent highlight: purple glow when agent is interacting with this node's tool
+  const isAgentHighlighted = agentHighlightNodeId === id
+
   // Get status-based styling
   const statusStyles = getStatusStyles(nodeStatus)
-  const effectiveBorderColor = nodeStatus ? statusStyles.borderColor : (selected ? color : '#333333')
-  const boxShadow = nodeStatus ? statusStyles.glowColor : 'none'
+  const effectiveBorderColor = isAgentHighlighted
+    ? '#8b5cf6' // violet-500 for agent highlight
+    : nodeStatus
+      ? statusStyles.borderColor
+      : (selected ? color : '#333333')
+  const boxShadow = isAgentHighlighted
+    ? '0 0 16px rgba(139, 92, 246, 0.6), 0 0 32px rgba(139, 92, 246, 0.2)'
+    : nodeStatus
+      ? statusStyles.glowColor
+      : 'none'
 
   // Calculate handle positions
   const getInputHandleTop = (index: number) => {

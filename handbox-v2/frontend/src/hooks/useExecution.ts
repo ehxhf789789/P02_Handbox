@@ -55,7 +55,7 @@ interface NodeStatusEvent {
 }
 
 export function useExecution() {
-  const { startExecution, completeExecution, updateNodeStatus, updateNodeDetail } = useExecutionStore()
+  const { startExecution, completeExecution, updateNodeStatus, updateNodeDetail, updateEdgeFlowStatus } = useExecutionStore()
   const { nodes, getWorkflowJson } = useWorkflowStore()
   const unlistenRef = useRef<UnlistenFn | null>(null)
 
@@ -112,6 +112,28 @@ export function useExecution() {
           output,
           duration_ms,
         })
+
+        // Update edge flow statuses based on node transitions
+        const currentEdges = useWorkflowStore.getState().edges
+        if (mappedStatus === 'running') {
+          // Mark incoming edges as active (data flowing in)
+          currentEdges
+            .filter(e => e.target === node_id)
+            .forEach(e => updateEdgeFlowStatus(e.id, 'active'))
+        } else if (mappedStatus === 'completed') {
+          // Mark incoming edges as completed, outgoing edges as active
+          currentEdges
+            .filter(e => e.target === node_id)
+            .forEach(e => updateEdgeFlowStatus(e.id, 'completed'))
+          currentEdges
+            .filter(e => e.source === node_id)
+            .forEach(e => updateEdgeFlowStatus(e.id, 'active'))
+        } else if (mappedStatus === 'failed') {
+          // Mark incoming edges as failed
+          currentEdges
+            .filter(e => e.target === node_id)
+            .forEach(e => updateEdgeFlowStatus(e.id, 'failed'))
+        }
 
         // Log for debugging
         if (error) {

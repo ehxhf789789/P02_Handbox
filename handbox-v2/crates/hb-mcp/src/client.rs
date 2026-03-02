@@ -126,13 +126,13 @@ impl McpClient {
                 self.initialize_sse(&url).await
             }
             Transport::WebSocket { url } => {
-                // WebSocket not yet implemented
-                tracing::warn!("WebSocket transport not yet implemented: {url}");
-                self.initialized = true;
-                Ok(ServerInfo {
-                    name: format!("ws({})", url),
-                    version: "unknown".into(),
-                })
+                // WebSocket transport: convert ws(s):// to http(s):// and use HTTP POST
+                // (Streamable HTTP transport — MCP 2025-03-26 spec)
+                let http_url = url
+                    .replace("wss://", "https://")
+                    .replace("ws://", "http://");
+                tracing::info!("WebSocket transport mapped to HTTP: {http_url}");
+                self.initialize_sse(&http_url).await
             }
         }
     }

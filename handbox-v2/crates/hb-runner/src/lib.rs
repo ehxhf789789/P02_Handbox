@@ -8,7 +8,7 @@ pub mod scheduler;
 
 // Re-export commonly used types
 pub use cache::ExecutionCache;
-pub use scheduler::{ExecutionContext, NodeStatusEvent, StatusCallback};
+pub use scheduler::{AgentTaskExecutor, AgentTaskParams, ExecutionContext, NodeStatusEvent, StatusCallback};
 
 use hb_core::graph::WorkflowSpec;
 use hb_core::trace::ExecutionRecord;

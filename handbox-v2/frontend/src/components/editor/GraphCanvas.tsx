@@ -12,7 +12,7 @@ import {
   type Node,
   type Edge,
 } from '@xyflow/react'
-import { useCallback, useRef, useState, useEffect } from 'react'
+import { useCallback, useMemo, useRef, useState, useEffect } from 'react'
 import { PrimitiveNode } from './PrimitiveNode'
 import { CompositeNode } from './CompositeNode'
 import { InlineNodeEditor } from './InlineNodeEditor'
@@ -69,7 +69,11 @@ export function GraphCanvas() {
   } | null>(null)
 
   // Execution store
-  const { nodeStatuses, nodeDetails, updateNodeStatus, updateNodeDetail } = useExecutionStore()
+  const { nodeStatuses, nodeDetails, edgeFlowStatuses, updateNodeStatus, updateNodeDetail } = useExecutionStore()
+
+  // Node output tooltip state
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null)
+  const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
 
   // Keyboard shortcut: Delete or Backspace to remove selected node or edge
   useEffect(() => {
@@ -293,6 +297,88 @@ export function GraphCanvas() {
     setContextMenu(null)
   }, [contextMenu, addNode])
 
+  // Node hover handlers for output tooltip
+  const onNodeMouseEnter = useCallback(
+    (event: React.MouseEvent, node: Node) => {
+      const detail = nodeDetails[node.id]
+      if (detail?.output || detail?.error) {
+        setHoveredNodeId(node.id)
+        setTooltipPos({ x: event.clientX + 16, y: event.clientY - 8 })
+      }
+    },
+    [nodeDetails]
+  )
+
+  const onNodeMouseLeave = useCallback(() => {
+    setHoveredNodeId(null)
+  }, [])
+
+  // Edge styling based on execution data flow
+  const styledEdges = useMemo(() => {
+    return edges.map((e) => {
+      const isSelected = e.id === selectedEdgeId
+      if (isSelected) {
+        return { ...e, selected: true, style: { stroke: '#f43f5e', strokeWidth: 3 } }
+      }
+
+      const flowStatus = edgeFlowStatuses[e.id]
+      const sourceStatus = nodeStatuses[e.source]
+      const targetStatus = nodeStatuses[e.target]
+
+      // Data flow visualization: color edges based on execution state
+      if (flowStatus === 'active' || sourceStatus === 'running') {
+        // Data is flowing through this edge — cyan pulse
+        return {
+          ...e,
+          animated: true,
+          style: { stroke: '#06b6d4', strokeWidth: 3, filter: 'drop-shadow(0 0 4px rgba(6,182,212,0.6))' },
+        }
+      }
+      if (flowStatus === 'completed' || (sourceStatus === 'completed' && (targetStatus === 'completed' || targetStatus === 'running'))) {
+        // Data has flowed through — green
+        return {
+          ...e,
+          animated: false,
+          style: { stroke: '#22c55e', strokeWidth: 2.5 },
+        }
+      }
+      if (flowStatus === 'failed' || sourceStatus === 'failed') {
+        // Error in source — red
+        return {
+          ...e,
+          animated: false,
+          style: { stroke: '#ef4444', strokeWidth: 2, opacity: 0.6 },
+        }
+      }
+      if (sourceStatus === 'pending' || targetStatus === 'pending') {
+        // Waiting — dimmed
+        return {
+          ...e,
+          animated: true,
+          style: { stroke: '#525252', strokeWidth: 1.5, opacity: 0.5 },
+        }
+      }
+
+      // Default
+      return {
+        ...e,
+        style: { stroke: '#525252', strokeWidth: 2 },
+      }
+    })
+  }, [edges, selectedEdgeId, edgeFlowStatuses, nodeStatuses])
+
+  // Format output preview for tooltip
+  const getOutputPreview = useCallback((nodeId: string): string | null => {
+    const detail = nodeDetails[nodeId]
+    if (!detail) return null
+    if (detail.error) return `Error: ${detail.error.slice(0, 150)}`
+    if (detail.output === undefined || detail.output === null) return null
+    const text = typeof detail.output === 'string'
+      ? detail.output
+      : JSON.stringify(detail.output, null, 2)
+    return text.length > 200 ? text.slice(0, 200) + '...' : text
+  }, [nodeDetails])
+
   return (
     <div
       ref={reactFlowWrapper}
@@ -304,19 +390,15 @@ export function GraphCanvas() {
     >
       <ReactFlow
         nodes={nodes}
-        edges={edges.map((e) => ({
-          ...e,
-          selected: e.id === selectedEdgeId,
-          style: e.id === selectedEdgeId
-            ? { stroke: '#f43f5e', strokeWidth: 3 }
-            : { stroke: '#525252', strokeWidth: 2 },
-        }))}
+        edges={styledEdges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onNodeClick={onNodeClick}
         onNodeDoubleClick={onNodeDoubleClick}
         onNodeContextMenu={onNodeContextMenu}
+        onNodeMouseEnter={onNodeMouseEnter}
+        onNodeMouseLeave={onNodeMouseLeave}
         onEdgeClick={onEdgeClick}
         onPaneClick={onPaneClick}
         onDrop={onDrop}
@@ -407,6 +489,40 @@ export function GraphCanvas() {
           }}
         />
       )}
+
+      {/* Node output tooltip — shows data preview on hover */}
+      {hoveredNodeId && (() => {
+        const preview = getOutputPreview(hoveredNodeId)
+        const detail = nodeDetails[hoveredNodeId]
+        if (!preview && !detail) return null
+        return (
+          <div
+            className="fixed z-50 pointer-events-none max-w-xs"
+            style={{ left: tooltipPos.x, top: tooltipPos.y }}
+          >
+            <div className="bg-neutral-900 border border-neutral-700 rounded-lg shadow-xl p-3 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
+                  detail?.status === 'completed' ? 'bg-emerald-900/60 text-emerald-400' :
+                  detail?.status === 'failed' ? 'bg-red-900/60 text-red-400' :
+                  detail?.status === 'running' ? 'bg-blue-900/60 text-blue-400' :
+                  'bg-neutral-800 text-neutral-400'
+                }`}>
+                  {detail?.status ?? 'idle'}
+                </span>
+                {detail?.duration_ms !== undefined && (
+                  <span className="text-[10px] text-neutral-500">{detail.duration_ms}ms</span>
+                )}
+              </div>
+              {preview && (
+                <pre className="text-[10px] text-neutral-300 font-mono whitespace-pre-wrap break-all max-h-32 overflow-hidden">
+                  {preview}
+                </pre>
+              )}
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }

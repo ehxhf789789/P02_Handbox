@@ -164,14 +164,29 @@ pub fn compute_cache_key(
     hex::encode(hasher.finalize())
 }
 
-/// Look up a cached result. Phase 0 stub: always returns None (cache miss).
-pub fn lookup(_cache_key: &str) -> Result<Option<serde_json::Value>, RunnerError> {
-    Ok(None)
+/// Global singleton cache reference for legacy free-function API.
+static GLOBAL_CACHE: std::sync::OnceLock<ExecutionCache> = std::sync::OnceLock::new();
+
+/// Initialize the global cache (call once at startup).
+pub fn init_global_cache() -> Result<(), RunnerError> {
+    let cache = ExecutionCache::in_memory()?;
+    GLOBAL_CACHE.set(cache).map_err(|_| RunnerError::Cache("Global cache already initialized".into()))
 }
 
-/// Store a result in the cache. Phase 0 stub: no-op.
-pub fn store(_cache_key: &str, _output: &serde_json::Value) -> Result<(), RunnerError> {
-    Ok(())
+/// Look up a cached result via the global cache.
+pub fn lookup(cache_key: &str) -> Result<Option<serde_json::Value>, RunnerError> {
+    match GLOBAL_CACHE.get() {
+        Some(cache) => cache.lookup(cache_key),
+        None => Ok(None), // No cache initialized — cache miss
+    }
+}
+
+/// Store a result in the global cache.
+pub fn store(cache_key: &str, output: &serde_json::Value) -> Result<(), RunnerError> {
+    match GLOBAL_CACHE.get() {
+        Some(cache) => cache.store(cache_key, output, None),
+        None => Ok(()), // No cache initialized — no-op
+    }
 }
 
 #[cfg(test)]

@@ -53,8 +53,8 @@ pub struct AppState {
     /// Tool registry (loaded from packs).
     pub tool_registry: Arc<RwLock<ToolRegistry>>,
 
-    /// Trace store (SQLite).
-    pub trace_store: Arc<RwLock<Option<TraceStore>>>,
+    /// Trace store (SQLite), Arc-wrapped for sharing with execution context.
+    pub trace_store: Arc<RwLock<Option<Arc<TraceStore>>>>,
 
     /// Project manager.
     pub project_manager: Arc<RwLock<ProjectManager>>,
@@ -118,7 +118,7 @@ impl AppState {
             TraceStore::open(&path).map_err(|e| format!("Failed to open trace store: {e}"))?;
         // We can't await here in a sync context, so we use try_write
         if let Ok(mut guard) = self.trace_store.try_write() {
-            *guard = Some(store);
+            *guard = Some(Arc::new(store));
         }
         Ok(())
     }

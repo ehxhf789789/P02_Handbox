@@ -10,9 +10,19 @@ use sha2::{Digest, Sha256};
 // ============================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatMessage {
+    pub role: String,      // "user" | "assistant" | "system"
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LLMRequest {
     pub prompt: String,
     pub system_prompt: Option<String>,
+    /// Structured conversation messages. When provided, these are sent as
+    /// proper role-based messages to the API instead of concatenating into
+    /// a single prompt string. This significantly improves multi-turn quality.
+    pub messages: Option<Vec<ChatMessage>>,
     pub model_id: Option<String>,
     pub max_tokens: Option<i32>,
     pub temperature: Option<f32>,
@@ -59,6 +69,28 @@ pub struct ConnectionResult {
     pub provider: String,
     pub region: Option<String>,
     pub error: Option<String>,
+}
+
+/// Build messages JSON array from either structured messages or a single prompt.
+fn build_messages_json(messages: &Option<Vec<ChatMessage>>, prompt: &str) -> Vec<serde_json::Value> {
+    if let Some(msgs) = messages {
+        if !msgs.is_empty() {
+            return msgs.iter().map(|m| {
+                // Map "system" role messages to "user" for APIs that don't support system in messages
+                // (system prompt is handled separately at the API level)
+                let role = match m.role.as_str() {
+                    "system" => "user",
+                    other => other,
+                };
+                serde_json::json!({
+                    "role": role,
+                    "content": m.content
+                })
+            }).collect();
+        }
+    }
+    // Fallback: single user message from prompt string
+    vec![serde_json::json!({"role": "user", "content": prompt})]
 }
 
 // ============================================================
@@ -244,12 +276,14 @@ async fn call_anthropic(
     system_prompt: Option<&str>,
     max_tokens: i32,
     temperature: f32,
+    messages: &Option<Vec<ChatMessage>>,
 ) -> Result<LLMResponse, String> {
+    let msgs = build_messages_json(messages, prompt);
     let mut body = serde_json::json!({
         "model": model,
         "max_tokens": max_tokens,
         "temperature": temperature,
-        "messages": [{"role": "user", "content": prompt}]
+        "messages": msgs
     });
 
     if let Some(sys) = system_prompt {
@@ -309,9 +343,11 @@ async fn call_openai(
     system_prompt: Option<&str>,
     max_tokens: i32,
     temperature: f32,
+    chat_messages: &Option<Vec<ChatMessage>>,
 ) -> Result<LLMResponse, String> {
     let mut messages = Vec::new();
 
+    // OpenAI supports system role in messages directly
     if let Some(sys) = system_prompt {
         if !sys.is_empty() {
             messages.push(serde_json::json!({
@@ -321,10 +357,8 @@ async fn call_openai(
         }
     }
 
-    messages.push(serde_json::json!({
-        "role": "user",
-        "content": prompt
-    }));
+    // Append structured conversation messages or single prompt
+    messages.extend(build_messages_json(chat_messages, prompt));
 
     let body = serde_json::json!({
         "model": model,
@@ -383,57 +417,121 @@ async fn call_local_llm(
     system_prompt: Option<&str>,
     max_tokens: i32,
     temperature: f32,
+    chat_messages: &Option<Vec<ChatMessage>>,
 ) -> Result<LLMResponse, String> {
-    let url = format!("{}/api/generate", endpoint.trim_end_matches('/'));
-
-    let mut body = serde_json::json!({
-        "model": model,
-        "prompt": prompt,
-        "stream": false,
-        "options": {
-            "num_predict": max_tokens,
-            "temperature": temperature
-        }
-    });
-
-    if let Some(sys) = system_prompt {
-        if !sys.is_empty() {
-            body["system"] = serde_json::Value::String(sys.to_string());
-        }
-    }
+    let base = endpoint.trim_end_matches('/');
+    let has_messages = chat_messages.as_ref().map(|m| !m.is_empty()).unwrap_or(false);
 
     let client = reqwest::Client::new();
-    let response = client
-        .post(&url)
-        .header("Content-Type", "application/json")
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("Local LLM request failed: {}", e))?;
 
-    let status = response.status();
-    if !status.is_success() {
-        let error_body = response.text().await.unwrap_or_default();
-        return Err(format!("Local LLM error (HTTP {}): {}", status, error_body));
+    if has_messages {
+        // Use Ollama /api/chat for multi-turn conversations
+        let url = format!("{base}/api/chat");
+        let mut messages = Vec::new();
+
+        if let Some(sys) = system_prompt {
+            if !sys.is_empty() {
+                messages.push(serde_json::json!({"role": "system", "content": sys}));
+            }
+        }
+
+        for m in chat_messages.as_deref().unwrap_or(&[]) {
+            messages.push(serde_json::json!({"role": m.role, "content": m.content}));
+        }
+
+        let body = serde_json::json!({
+            "model": model,
+            "messages": messages,
+            "stream": false,
+            "options": {
+                "num_predict": max_tokens,
+                "temperature": temperature
+            }
+        });
+
+        let response = client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("Local LLM request failed: {}", e))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let error_body = response.text().await.unwrap_or_default();
+            return Err(format!("Local LLM error (HTTP {}): {}", status, error_body));
+        }
+
+        let result: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| format!("Response parse failed: {}", e))?;
+
+        let text = result["message"]["content"].as_str().unwrap_or("").to_string();
+        let eval_count = result["eval_count"].as_i64().unwrap_or(0) as i32;
+        let prompt_eval_count = result["prompt_eval_count"].as_i64().unwrap_or(0) as i32;
+
+        Ok(LLMResponse {
+            text,
+            model: model.to_string(),
+            usage: TokenUsage {
+                input_tokens: prompt_eval_count,
+                output_tokens: eval_count,
+            },
+        })
+    } else {
+        // Fallback: single prompt via /api/generate
+        let url = format!("{base}/api/generate");
+
+        let mut body = serde_json::json!({
+            "model": model,
+            "prompt": prompt,
+            "stream": false,
+            "options": {
+                "num_predict": max_tokens,
+                "temperature": temperature
+            }
+        });
+
+        if let Some(sys) = system_prompt {
+            if !sys.is_empty() {
+                body["system"] = serde_json::Value::String(sys.to_string());
+            }
+        }
+
+        let response = client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("Local LLM request failed: {}", e))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let error_body = response.text().await.unwrap_or_default();
+            return Err(format!("Local LLM error (HTTP {}): {}", status, error_body));
+        }
+
+        let result: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| format!("Response parse failed: {}", e))?;
+
+        let text = result["response"].as_str().unwrap_or("").to_string();
+        let eval_count = result["eval_count"].as_i64().unwrap_or(0) as i32;
+        let prompt_eval_count = result["prompt_eval_count"].as_i64().unwrap_or(0) as i32;
+
+        Ok(LLMResponse {
+            text,
+            model: model.to_string(),
+            usage: TokenUsage {
+                input_tokens: prompt_eval_count,
+                output_tokens: eval_count,
+            },
+        })
     }
-
-    let result: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|e| format!("Response parse failed: {}", e))?;
-
-    let text = result["response"].as_str().unwrap_or("").to_string();
-    let eval_count = result["eval_count"].as_i64().unwrap_or(0) as i32;
-    let prompt_eval_count = result["prompt_eval_count"].as_i64().unwrap_or(0) as i32;
-
-    Ok(LLMResponse {
-        text,
-        model: model.to_string(),
-        usage: TokenUsage {
-            input_tokens: prompt_eval_count,
-            output_tokens: eval_count,
-        },
-    })
 }
 
 // ============================================================
@@ -639,7 +737,7 @@ pub async fn test_llm_connection(provider: String) -> Result<ConnectionResult, S
                 }
             };
 
-            let result = call_openai(&api_key, "gpt-3.5-turbo", "Hi", None, 10, 0.0).await;
+            let result = call_openai(&api_key, "gpt-3.5-turbo", "Hi", None, 10, 0.0, &None).await;
 
             match result {
                 Ok(_) => Ok(ConnectionResult {
@@ -669,7 +767,7 @@ pub async fn test_llm_connection(provider: String) -> Result<ConnectionResult, S
                 }
             };
 
-            let result = call_anthropic(&api_key, "claude-3-haiku-20240307", "Hi", None, 10, 0.0).await;
+            let result = call_anthropic(&api_key, "claude-3-haiku-20240307", "Hi", None, 10, 0.0, &None).await;
 
             match result {
                 Ok(_) => Ok(ConnectionResult {
@@ -869,31 +967,19 @@ pub async fn invoke_llm(request: LLMRequest) -> Result<LLMResponse, String> {
             let region = std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string());
             let base_model_id = normalize_model_id(&model_id);
 
-            let body = if let Some(ref sys) = request.system_prompt {
-                if sys.is_empty() {
-                    serde_json::json!({
-                        "anthropic_version": "bedrock-2023-05-31",
-                        "max_tokens": max_tokens,
-                        "temperature": temperature,
-                        "messages": [{"role": "user", "content": request.prompt}]
-                    })
-                } else {
-                    serde_json::json!({
-                        "anthropic_version": "bedrock-2023-05-31",
-                        "max_tokens": max_tokens,
-                        "temperature": temperature,
-                        "system": sys,
-                        "messages": [{"role": "user", "content": request.prompt}]
-                    })
+            let msgs = build_messages_json(&request.messages, &request.prompt);
+            let mut body = serde_json::json!({
+                "anthropic_version": "bedrock-2023-05-31",
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "messages": msgs
+            });
+
+            if let Some(ref sys) = request.system_prompt {
+                if !sys.is_empty() {
+                    body["system"] = serde_json::Value::String(sys.clone());
                 }
-            } else {
-                serde_json::json!({
-                    "anthropic_version": "bedrock-2023-05-31",
-                    "max_tokens": max_tokens,
-                    "temperature": temperature,
-                    "messages": [{"role": "user", "content": request.prompt}]
-                })
-            };
+            }
 
             // Try multiple regions
             let regions = [region.as_str(), "us-east-1", "us-west-2"];
@@ -927,6 +1013,7 @@ pub async fn invoke_llm(request: LLMRequest) -> Result<LLMResponse, String> {
                 request.system_prompt.as_deref(),
                 max_tokens,
                 temperature,
+                &request.messages,
             )
             .await
         }
@@ -940,6 +1027,7 @@ pub async fn invoke_llm(request: LLMRequest) -> Result<LLMResponse, String> {
                 request.system_prompt.as_deref(),
                 max_tokens,
                 temperature,
+                &request.messages,
             )
             .await
         }
@@ -953,6 +1041,7 @@ pub async fn invoke_llm(request: LLMRequest) -> Result<LLMResponse, String> {
                 request.system_prompt.as_deref(),
                 max_tokens,
                 temperature,
+                &request.messages,
             )
             .await
         }
@@ -986,4 +1075,408 @@ pub async fn create_embedding(request: EmbeddingRequest) -> Result<EmbeddingResp
     let dimension = embedding.len();
 
     Ok(EmbeddingResponse { embedding, dimension })
+}
+
+// ============================================================
+// Streaming LLM Invoke (token-by-token via Tauri events)
+// ============================================================
+
+/// Invoke LLM with token streaming — emits "llm-stream" events
+#[tauri::command]
+pub async fn invoke_llm_stream(
+    request: LLMRequest,
+    stream_id: String,
+    app: tauri::AppHandle,
+) -> Result<LLMResponse, String> {
+    use tauri::Emitter;
+
+    let provider = request.provider.as_deref().unwrap_or("bedrock");
+    let model_id = request.model_id.clone().unwrap_or_else(|| match provider {
+        "openai" => "gpt-4o".to_string(),
+        "local" => "llama3.2".to_string(),
+        "anthropic" => "claude-3-5-sonnet-20241022".to_string(),
+        _ => "anthropic.claude-3-5-sonnet-20240620-v1:0".to_string(),
+    });
+    let max_tokens = request.max_tokens.unwrap_or(4096);
+    let temperature = request.temperature.unwrap_or(0.7);
+
+    match provider {
+        "anthropic" => {
+            let api_key = std::env::var("ANTHROPIC_API_KEY")
+                .map_err(|_| "No Anthropic API key configured")?;
+            stream_anthropic(
+                &api_key, &model_id, &request.prompt,
+                request.system_prompt.as_deref(),
+                max_tokens, temperature, &stream_id, &app,
+                &request.messages,
+            ).await
+        }
+        "bedrock" => {
+            let access_key = std::env::var("AWS_ACCESS_KEY_ID")
+                .map_err(|_| "No AWS Access Key ID configured")?;
+            let secret_key = std::env::var("AWS_SECRET_ACCESS_KEY")
+                .map_err(|_| "No AWS Secret Access Key configured")?;
+            let region = std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string());
+            let base_model = normalize_model_id(&model_id);
+            stream_bedrock(
+                &access_key, &secret_key, &base_model, &region,
+                &request.prompt, request.system_prompt.as_deref(),
+                max_tokens, temperature, &stream_id, &app,
+                &request.messages,
+            ).await
+        }
+        _ => {
+            // Fallback: non-streaming invoke + emit complete text
+            let resp = invoke_llm(request).await?;
+            let _ = app.emit("llm-stream", serde_json::json!({
+                "stream_id": stream_id,
+                "type": "text",
+                "text": resp.text,
+            }));
+            let _ = app.emit("llm-stream", serde_json::json!({
+                "stream_id": stream_id,
+                "type": "done",
+                "usage": { "input_tokens": resp.usage.input_tokens, "output_tokens": resp.usage.output_tokens },
+            }));
+            Ok(resp)
+        }
+    }
+}
+
+/// Stream from Anthropic Messages API (SSE)
+async fn stream_anthropic(
+    api_key: &str,
+    model: &str,
+    prompt: &str,
+    system_prompt: Option<&str>,
+    max_tokens: i32,
+    temperature: f32,
+    stream_id: &str,
+    app: &tauri::AppHandle,
+    messages: &Option<Vec<ChatMessage>>,
+) -> Result<LLMResponse, String> {
+    use tauri::Emitter;
+
+    let msgs = build_messages_json(messages, prompt);
+    let mut body = serde_json::json!({
+        "model": model,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "stream": true,
+        "messages": msgs
+    });
+
+    if let Some(sys) = system_prompt {
+        if !sys.is_empty() {
+            body["system"] = serde_json::Value::String(sys.to_string());
+        }
+    }
+
+    let client = reqwest::Client::new();
+    let mut response = client
+        .post("https://api.anthropic.com/v1/messages")
+        .header("x-api-key", api_key)
+        .header("anthropic-version", "2023-06-01")
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Anthropic stream request failed: {e}"))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let error_body = response.text().await.unwrap_or_default();
+        return Err(format!("Anthropic stream error (HTTP {status}): {error_body}"));
+    }
+
+    let mut full_text = String::new();
+    let mut input_tokens = 0i32;
+    let mut output_tokens = 0i32;
+
+    // Read SSE stream using chunk() (no extra deps needed)
+    let mut buffer = String::new();
+
+    while let Some(chunk) = response.chunk().await.map_err(|e| format!("Stream read error: {e}"))? {
+        buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+        // Process complete SSE lines
+        while let Some(line_end) = buffer.find('\n') {
+            let line = buffer[..line_end].trim().to_string();
+            buffer = buffer[line_end + 1..].to_string();
+
+            if line.starts_with("data: ") {
+                let data = &line[6..];
+                if data == "[DONE]" {
+                    continue;
+                }
+                if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
+                    let event_type = event["type"].as_str().unwrap_or("");
+                    match event_type {
+                        "content_block_delta" => {
+                            if let Some(text) = event["delta"]["text"].as_str() {
+                                full_text.push_str(text);
+                                let _ = app.emit("llm-stream", serde_json::json!({
+                                    "stream_id": stream_id,
+                                    "type": "text",
+                                    "text": text,
+                                }));
+                            }
+                        }
+                        "message_start" => {
+                            if let Some(usage) = event["message"]["usage"].as_object() {
+                                input_tokens = usage.get("input_tokens")
+                                    .and_then(|v| v.as_i64())
+                                    .unwrap_or(0) as i32;
+                            }
+                        }
+                        "message_delta" => {
+                            if let Some(usage) = event["usage"].as_object() {
+                                output_tokens = usage.get("output_tokens")
+                                    .and_then(|v| v.as_i64())
+                                    .unwrap_or(0) as i32;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    let _ = app.emit("llm-stream", serde_json::json!({
+        "stream_id": stream_id,
+        "type": "done",
+        "usage": { "input_tokens": input_tokens, "output_tokens": output_tokens },
+    }));
+
+    Ok(LLMResponse {
+        text: full_text,
+        model: model.to_string(),
+        usage: TokenUsage { input_tokens, output_tokens },
+    })
+}
+
+/// Stream from Bedrock (SSE via invoke-with-response-stream)
+async fn stream_bedrock(
+    access_key: &str,
+    secret_key: &str,
+    model_id: &str,
+    region: &str,
+    prompt: &str,
+    system_prompt: Option<&str>,
+    max_tokens: i32,
+    temperature: f32,
+    stream_id: &str,
+    app: &tauri::AppHandle,
+    messages: &Option<Vec<ChatMessage>>,
+) -> Result<LLMResponse, String> {
+    use tauri::Emitter;
+
+    let service = "bedrock";
+    let host = format!("bedrock-runtime.{region}.amazonaws.com");
+    let encoded_model_id = model_id.replace(":", "%3A");
+    let uri = format!("/model/{encoded_model_id}/invoke-with-response-stream");
+
+    let mut parsed_url = url::Url::parse(&format!("https://{host}/"))
+        .map_err(|e| format!("Invalid base URL: {e}"))?;
+    parsed_url
+        .path_segments_mut()
+        .map_err(|_| "Cannot set path segments")?
+        .push("model")
+        .push(model_id)
+        .push("invoke-with-response-stream");
+
+    let msgs = build_messages_json(messages, prompt);
+    let mut body = serde_json::json!({
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "messages": msgs
+    });
+
+    if let Some(sys) = system_prompt {
+        if !sys.is_empty() {
+            body["system"] = serde_json::Value::String(sys.to_string());
+        }
+    }
+
+    let payload = serde_json::to_vec(&body).map_err(|e| format!("JSON error: {e}"))?;
+
+    let (authorization, amz_date, payload_hash, _) = sign_aws_request(
+        access_key, secret_key, region, service, "POST", &host, &uri, &payload,
+    );
+
+    let client = reqwest::Client::new();
+    let mut response = client
+        .post(parsed_url)
+        .header("Host", &host)
+        .header("X-Amz-Date", &amz_date)
+        .header("X-Amz-Content-Sha256", &payload_hash)
+        .header("Authorization", &authorization)
+        .header("Content-Type", "application/json")
+        .body(payload)
+        .send()
+        .await
+        .map_err(|e| format!("Bedrock stream request failed: {e}"))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let error_body = response.text().await.unwrap_or_default();
+        // Fallback to non-streaming if streaming endpoint fails
+        tracing::warn!("Bedrock streaming failed (HTTP {status}), falling back to non-streaming");
+        let fallback_msgs = build_messages_json(messages, prompt);
+        let body_val = serde_json::json!({
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "system": system_prompt.unwrap_or(""),
+            "messages": fallback_msgs
+        });
+        let regions = [region, "us-east-1", "us-west-2"];
+        for r in regions {
+            if let Ok(resp) = call_bedrock(access_key, secret_key, model_id, r, &body_val).await {
+                let text = resp["content"][0]["text"].as_str().unwrap_or("").to_string();
+                let it = resp["usage"]["input_tokens"].as_i64().unwrap_or(0) as i32;
+                let ot = resp["usage"]["output_tokens"].as_i64().unwrap_or(0) as i32;
+                let _ = app.emit("llm-stream", serde_json::json!({
+                    "stream_id": stream_id, "type": "text", "text": &text,
+                }));
+                let _ = app.emit("llm-stream", serde_json::json!({
+                    "stream_id": stream_id, "type": "done",
+                    "usage": { "input_tokens": it, "output_tokens": ot },
+                }));
+                return Ok(LLMResponse { text, model: model_id.to_string(), usage: TokenUsage { input_tokens: it, output_tokens: ot } });
+            }
+        }
+        return Err(format!("Bedrock stream error: {error_body}"));
+    }
+
+    // Parse Bedrock event stream — AWS Event Stream binary format
+    // Each frame: [total_len:4][headers_len:4][prelude_crc:4][headers:N][payload:M][message_crc:4]
+    let mut full_text = String::new();
+    let mut input_tokens = 0i32;
+    let mut output_tokens = 0i32;
+
+    let mut buffer: Vec<u8> = Vec::new();
+
+    while let Some(chunk) = response.chunk().await.map_err(|e| format!("Stream error: {e}"))? {
+        buffer.extend_from_slice(&chunk);
+
+        // Process complete binary event frames from the buffer
+        loop {
+            // Need at least 16 bytes: prelude(8) + prelude_crc(4) + message_crc(4)
+            if buffer.len() < 16 { break; }
+
+            let total_len = u32::from_be_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]) as usize;
+
+            // Sanity check — frames shouldn't exceed 1MB
+            if total_len > 1_048_576 || total_len < 16 {
+                // Corrupted frame; try to find next valid frame by scanning
+                buffer.remove(0);
+                continue;
+            }
+
+            // Wait for complete frame
+            if buffer.len() < total_len { break; }
+
+            let headers_len = u32::from_be_bytes([buffer[4], buffer[5], buffer[6], buffer[7]]) as usize;
+
+            // Extract payload: after prelude(8) + prelude_crc(4) + headers(N)
+            let payload_offset = 12 + headers_len;
+            let payload_end = total_len.saturating_sub(4); // exclude message CRC
+
+            if payload_end > payload_offset {
+                let payload = &buffer[payload_offset..payload_end];
+
+                // Payload is JSON like {"bytes":"base64data"} or direct content
+                if let Ok(event) = serde_json::from_slice::<serde_json::Value>(payload) {
+                    // Decode base64 "bytes" field → inner Anthropic-format JSON
+                    if let Some(bytes_b64) = event["bytes"].as_str() {
+                        if let Ok(decoded) = base64::Engine::decode(
+                            &base64::engine::general_purpose::STANDARD, bytes_b64
+                        ) {
+                            if let Ok(inner) = serde_json::from_slice::<serde_json::Value>(&decoded) {
+                                // content_block_delta → text
+                                if let Some(text) = inner["delta"]["text"].as_str() {
+                                    full_text.push_str(text);
+                                    let _ = app.emit("llm-stream", serde_json::json!({
+                                        "stream_id": stream_id, "type": "text", "text": text,
+                                    }));
+                                }
+                                // message_start → input_tokens
+                                if let Some(it) = inner["message"]["usage"]["input_tokens"].as_i64() {
+                                    input_tokens = it as i32;
+                                }
+                                // message_delta → output_tokens
+                                if let Some(ot) = inner["usage"]["output_tokens"].as_i64() {
+                                    output_tokens = ot as i32;
+                                }
+                                // message_stop → invocation metrics
+                                if let Some(metrics) = inner["amazon-bedrock-invocationMetrics"].as_object() {
+                                    input_tokens = metrics.get("inputTokenCount")
+                                        .and_then(|v| v.as_i64()).unwrap_or(input_tokens as i64) as i32;
+                                    output_tokens = metrics.get("outputTokenCount")
+                                        .and_then(|v| v.as_i64()).unwrap_or(output_tokens as i64) as i32;
+                                }
+                            }
+                        }
+                    }
+                    // Direct metrics in payload (some Bedrock versions)
+                    if let Some(metrics) = event["amazon-bedrock-invocationMetrics"].as_object() {
+                        input_tokens = metrics.get("inputTokenCount")
+                            .and_then(|v| v.as_i64()).unwrap_or(input_tokens as i64) as i32;
+                        output_tokens = metrics.get("outputTokenCount")
+                            .and_then(|v| v.as_i64()).unwrap_or(output_tokens as i64) as i32;
+                    }
+                }
+            }
+
+            // Advance past this frame
+            buffer = buffer[total_len..].to_vec();
+        }
+    }
+
+    // If streaming produced no text, fall back to non-streaming call
+    if full_text.is_empty() {
+        tracing::warn!("Bedrock streaming produced no text, falling back to non-streaming");
+        let fallback_msgs = build_messages_json(messages, prompt);
+        let body_val = serde_json::json!({
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "system": system_prompt.unwrap_or(""),
+            "messages": fallback_msgs
+        });
+        let regions = [region, "us-east-1", "us-west-2"];
+        for r in regions {
+            if let Ok(resp) = call_bedrock(access_key, secret_key, model_id, r, &body_val).await {
+                let text = resp["content"][0]["text"].as_str().unwrap_or("").to_string();
+                if !text.is_empty() {
+                    let it = resp["usage"]["input_tokens"].as_i64().unwrap_or(0) as i32;
+                    let ot = resp["usage"]["output_tokens"].as_i64().unwrap_or(0) as i32;
+                    let _ = app.emit("llm-stream", serde_json::json!({
+                        "stream_id": stream_id, "type": "text", "text": &text,
+                    }));
+                    let _ = app.emit("llm-stream", serde_json::json!({
+                        "stream_id": stream_id, "type": "done",
+                        "usage": { "input_tokens": it, "output_tokens": ot },
+                    }));
+                    return Ok(LLMResponse { text, model: model_id.to_string(), usage: TokenUsage { input_tokens: it, output_tokens: ot } });
+                }
+            }
+        }
+        return Err("Bedrock returned empty response — check model ID and credentials".to_string());
+    }
+
+    let _ = app.emit("llm-stream", serde_json::json!({
+        "stream_id": stream_id,
+        "type": "done",
+        "usage": { "input_tokens": input_tokens, "output_tokens": output_tokens },
+    }));
+
+    Ok(LLMResponse {
+        text: full_text,
+        model: model_id.to_string(),
+        usage: TokenUsage { input_tokens, output_tokens },
+    })
 }

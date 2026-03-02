@@ -119,7 +119,7 @@ export const toolCategories: ToolCategory[] = [
         category: 'io',
         description: 'Read multiple files at once',
         icon: 'Files',
-        inputs: [],
+        inputs: [{ name: 'paths', type: 'array' }],
         outputs: [{ name: 'contents', type: 'array' }],
         configFields: [
           {
@@ -140,7 +140,7 @@ export const toolCategories: ToolCategory[] = [
         category: 'io',
         description: 'Read all files from a folder',
         icon: 'FolderOpen',
-        inputs: [],
+        inputs: [{ name: 'path', type: 'string' }],
         outputs: [{ name: 'files', type: 'array' }],
         configFields: [
           {
@@ -174,7 +174,18 @@ export const toolCategories: ToolCategory[] = [
           { name: 'content', type: 'string' },
         ],
         outputs: [{ name: 'success', type: 'boolean' }],
-        configFields: [],
+        configFields: [
+          {
+            name: 'file_path',
+            type: 'file',
+            label: 'Output File',
+            default: '',
+            fileFilters: [
+              { name: 'Text Files', extensions: ['txt', 'md', 'json', 'csv', 'xml', 'yaml', 'yml'] },
+              { name: 'All Files', extensions: ['*'] },
+            ],
+          },
+        ],
       },
       {
         id: 'user-input',
@@ -607,6 +618,145 @@ export const toolCategories: ToolCategory[] = [
     icon: 'FileDown',
     color: '#991b1b',
     tools: [], // Loaded from fusionToolCatalog
+  },
+  // ── Agent System Tools ──────────────────────────
+  {
+    id: 'agent-tools',
+    label: 'Agent Tools',
+    icon: 'Bot',
+    color: '#8b5cf6',
+    tools: [
+      {
+        id: 'agent.bash-execute',
+        label: 'Bash Execute',
+        category: 'agent-tools',
+        description: 'Execute shell commands',
+        icon: 'Terminal',
+        inputs: [{ name: 'command', type: 'string', required: true }],
+        outputs: [{ name: 'stdout', type: 'string' }, { name: 'stderr', type: 'string' }],
+        configFields: [
+          { name: 'working_dir', type: 'string', label: 'Working Directory' },
+          { name: 'timeout_ms', type: 'number', label: 'Timeout (ms)', default: 30000 },
+        ],
+      },
+      {
+        id: 'agent.file-read',
+        label: 'File Read',
+        category: 'agent-tools',
+        description: 'Read file contents with line numbers',
+        icon: 'FileText',
+        inputs: [{ name: 'path', type: 'string', required: true }],
+        outputs: [{ name: 'content', type: 'string' }],
+        configFields: [
+          { name: 'offset', type: 'number', label: 'Line Offset' },
+          { name: 'limit', type: 'number', label: 'Line Limit', default: 2000 },
+        ],
+      },
+      {
+        id: 'agent.file-write',
+        label: 'File Write',
+        category: 'agent-tools',
+        description: 'Write or create files',
+        icon: 'Save',
+        inputs: [{ name: 'path', type: 'string', required: true }, { name: 'content', type: 'string', required: true }],
+        outputs: [{ name: 'result', type: 'string' }],
+        configFields: [],
+      },
+      {
+        id: 'agent.file-edit',
+        label: 'File Edit',
+        category: 'agent-tools',
+        description: 'Find and replace in files',
+        icon: 'FileCode',
+        inputs: [
+          { name: 'path', type: 'string', required: true },
+          { name: 'old_string', type: 'string', required: true },
+          { name: 'new_string', type: 'string', required: true },
+        ],
+        outputs: [{ name: 'result', type: 'string' }],
+        configFields: [{ name: 'replace_all', type: 'boolean', label: 'Replace All', default: false }],
+      },
+      {
+        id: 'agent.grep-search',
+        label: 'Grep Search',
+        category: 'agent-tools',
+        description: 'Search code with regex patterns',
+        icon: 'Search',
+        inputs: [{ name: 'pattern', type: 'string', required: true }],
+        outputs: [{ name: 'matches', type: 'array' }],
+        configFields: [
+          { name: 'path', type: 'string', label: 'Search Path' },
+          { name: 'glob_filter', type: 'string', label: 'File Filter', placeholder: '*.ts' },
+        ],
+      },
+      {
+        id: 'agent.web-search',
+        label: 'Web Search',
+        category: 'agent-tools',
+        description: 'Search the web for information',
+        icon: 'Globe',
+        inputs: [{ name: 'query', type: 'string', required: true }],
+        outputs: [{ name: 'results', type: 'array' }],
+        configFields: [{ name: 'max_results', type: 'number', label: 'Max Results', default: 8 }],
+      },
+      {
+        id: 'agent.web-fetch',
+        label: 'Web Fetch',
+        category: 'agent-tools',
+        description: 'Fetch content from a URL',
+        icon: 'Download',
+        inputs: [{ name: 'url', type: 'string', required: true }],
+        outputs: [{ name: 'text', type: 'string' }, { name: 'title', type: 'string' }],
+        configFields: [{ name: 'max_chars', type: 'number', label: 'Max Characters', default: 50000 }],
+      },
+      {
+        id: 'agent.git-status',
+        label: 'Git Status',
+        category: 'agent-tools',
+        description: 'Show git repository status',
+        icon: 'GitBranch',
+        inputs: [],
+        outputs: [{ name: 'status', type: 'string' }],
+        configFields: [{ name: 'path', type: 'string', label: 'Repository Path' }],
+      },
+      {
+        id: 'agent.project-tree',
+        label: 'Project Tree',
+        category: 'agent-tools',
+        description: 'Show directory structure',
+        icon: 'FileText',
+        inputs: [],
+        outputs: [{ name: 'tree', type: 'string' }],
+        configFields: [
+          { name: 'path', type: 'string', label: 'Root Path' },
+          { name: 'max_depth', type: 'number', label: 'Max Depth', default: 4 },
+        ],
+      },
+      {
+        id: 'agent-task',
+        label: 'Agent Task',
+        category: 'agent-tools',
+        description: 'AI 에이전트 루프로 복잡한 작업 수행 (ReAct 패턴)',
+        icon: 'Sparkles',
+        inputs: [{ name: 'context', type: 'string', description: '에이전트에게 전달할 컨텍스트' }],
+        outputs: [
+          { name: 'result', type: 'string', description: '최종 답변' },
+          { name: 'steps', type: 'array', description: '실행 단계들' },
+        ],
+        configFields: [
+          { name: 'prompt', type: 'string', label: 'Task Prompt', default: '' },
+          { name: 'max_iterations', type: 'number', label: 'Max Iterations', default: 10 },
+          {
+            name: 'mode', type: 'select' as const, label: 'Mode', default: 'auto',
+            options: [
+              { value: 'auto', label: 'Auto' },
+              { value: 'plan', label: 'Plan Only' },
+              { value: 'execute', label: 'Execute Only' },
+            ],
+          },
+        ],
+      },
+    ],
   },
 ]
 

@@ -12,9 +12,15 @@ export interface LLMConfig {
   region?: string
 }
 
+export interface LLMChatMessage {
+  role: 'user' | 'assistant' | 'system'
+  content: string
+}
+
 export interface LLMRequest {
   prompt: string
   systemPrompt?: string
+  messages?: LLMChatMessage[]
   modelId?: string
   maxTokens?: number
   temperature?: number

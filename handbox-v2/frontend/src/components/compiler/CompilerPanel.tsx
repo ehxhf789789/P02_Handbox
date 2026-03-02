@@ -5,6 +5,7 @@
 
 import { useState } from 'react'
 import { Sparkles, Loader2, Wand2 } from 'lucide-react'
+import { safeInvoke } from '@/utils/tauri'
 
 interface CompilerPanelProps {
   onClose: () => void
@@ -35,10 +36,9 @@ export function CompilerPanel({ onClose, onGenerated }: CompilerPanelProps) {
     setError(null)
 
     try {
-      // Try Tauri backend first
-      const { compilePrompt } = await import('@/lib/tauri')
       console.log('[CompilerPanel] Calling compile_prompt with:', prompt)
-      const spec = await compilePrompt(prompt) as { nodes: unknown[]; edges: unknown[] }
+      const spec = await safeInvoke<{ nodes: unknown[]; edges: unknown[] }>('compile_prompt', { prompt })
+      if (!spec) throw new Error('Tauri 환경이 아니거나 컴파일 실패')
       console.log('[CompilerPanel] Received spec:', spec)
       onGenerated(spec.nodes, spec.edges)
       onClose()

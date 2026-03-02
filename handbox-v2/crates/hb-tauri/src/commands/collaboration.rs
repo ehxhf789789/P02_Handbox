@@ -510,12 +510,10 @@ pub async fn collab_broadcast_change(
     let sessions = state.sessions.read().await;
     let session = sessions.get(&session_id).ok_or("Session not found")?;
 
-    let collaborator = session.collaborators.iter().find(|c| c.id == user_id);
-    if collaborator.is_none() {
-        return Err("User not in session".to_string());
-    }
+    let collaborator = session.collaborators.iter().find(|c| c.id == user_id)
+        .ok_or_else(|| "User not in session".to_string())?;
 
-    let role = &collaborator.unwrap().role;
+    let role = &collaborator.role;
     if !session.settings.allow_editing && !matches!(role, CollaboratorRole::Owner) {
         return Err("Editing not allowed".to_string());
     }
@@ -575,12 +573,10 @@ pub async fn collab_create_invite(
     let sessions = state.sessions.read().await;
     let session = sessions.get(&session_id).ok_or("Session not found")?;
 
-    let collaborator = session.collaborators.iter().find(|c| c.id == user_id);
-    if collaborator.is_none() {
-        return Err("User not in session".to_string());
-    }
+    let collaborator = session.collaborators.iter().find(|c| c.id == user_id)
+        .ok_or_else(|| "User not in session".to_string())?;
 
-    let user_role = &collaborator.unwrap().role;
+    let user_role = &collaborator.role;
     if matches!(user_role, CollaboratorRole::Viewer) {
         return Err("Viewers cannot invite".to_string());
     }

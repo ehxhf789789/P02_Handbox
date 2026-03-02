@@ -1,9 +1,13 @@
 //! Agent orchestration commands — Multi-agent coordination backend.
+//!
+//! Key feature: `agent_dispatch_parallel` spawns N parallel agent loops
+//! with different system prompts/personas for multi-agent orchestration.
 
+use crate::commands::agent_loop::{run_agent_loop, AgentConversationState, AgentLoopRequest};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 use tokio::sync::RwLock;
 
 // ========== Types ==========
@@ -793,6 +797,307 @@ pub async fn agent_process_pending(
     }
 
     Ok(assigned_count)
+}
+
+// ========== Real Execution — Multi-Agent Dispatch ==========
+
+/// Request for parallel multi-agent dispatch
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiAgentRequest {
+    pub task: String,
+    pub agents: Vec<AgentSpec>,
+    pub working_dir: Option<String>,
+    pub max_iterations: Option<usize>,
+    pub mode: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSpec {
+    pub id: String,
+    pub name: String,
+    pub role: String,
+    pub system_prompt: String,
+    pub model_id: Option<String>,
+    pub provider: Option<String>,
+    pub allowed_tools: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiAgentResult {
+    pub task: String,
+    pub results: Vec<AgentResultEntry>,
+    pub total_agents: usize,
+    pub succeeded: usize,
+    pub failed: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentResultEntry {
+    pub agent_id: String,
+    pub agent_name: String,
+    pub role: String,
+    pub final_answer: String,
+    pub status: String,
+    pub iterations: usize,
+    pub error: Option<String>,
+}
+
+/// Execute a single registered agent task using the real agent loop
+#[tauri::command]
+pub async fn agent_execute_task(
+    task_id: String,
+    state: State<'_, Arc<AgentOrchestratorState>>,
+    conversations: State<'_, Arc<AgentConversationState>>,
+    app: AppHandle,
+) -> Result<serde_json::Value, String> {
+    // Get task info
+    let (task_payload, agent_id, task_type) = {
+        let mut tasks = state.tasks.write().await;
+        let task = tasks.get_mut(&task_id).ok_or("Task not found")?;
+        task.status = TaskStatus::Running;
+        task.started_at = Some(chrono::Utc::now().to_rfc3339());
+        (task.payload.clone(), task.assigned_agent_id.clone(), task.task_type.clone())
+    };
+
+    // Get agent definition for system prompt
+    let system_prompt = if let Some(ref aid) = agent_id {
+        let instances = state.instances.read().await;
+        if let Some(inst) = instances.get(aid) {
+            let defs = state.definitions.read().await;
+            defs.get(&inst.def_id).and_then(|d| d.system_prompt.clone())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Update agent status
+    if let Some(ref aid) = agent_id {
+        let mut instances = state.instances.write().await;
+        if let Some(agent) = instances.get_mut(aid) {
+            agent.status = AgentStatus::Busy;
+            agent.current_task_id = Some(task_id.clone());
+        }
+    }
+
+    let _ = app.emit("agent-orchestration", serde_json::json!({
+        "type": "task_started",
+        "task_id": task_id,
+        "agent_id": agent_id,
+    }));
+
+    // Build agent loop request from task payload
+    let task_text = task_payload["task"].as_str()
+        .or_else(|| task_payload["prompt"].as_str())
+        .unwrap_or("Perform the assigned task")
+        .to_string();
+
+    let request = AgentLoopRequest {
+        task: task_text,
+        system_prompt,
+        model_id: task_payload["model_id"].as_str().map(String::from),
+        provider: task_payload["provider"].as_str().map(String::from),
+        max_iterations: task_payload["max_iterations"].as_u64().map(|v| v as usize).or(Some(15)),
+        working_dir: task_payload["working_dir"].as_str().map(String::from),
+        conversation_id: Some(format!("orch-task-{}", task_id)),
+        mode: task_payload["mode"].as_str().map(String::from),
+        allowed_tools: None,
+        project_id: None,
+    };
+
+    let start = std::time::Instant::now();
+
+    // Run the actual agent loop
+    let loop_result = run_agent_loop(request, &*conversations, &app).await;
+    let elapsed = start.elapsed().as_secs_f64();
+
+    // Update task with result
+    let task_result = match &loop_result {
+        Ok(result) => TaskResult {
+            success: result.status == "completed",
+            output: Some(serde_json::json!({
+                "final_answer": result.final_answer,
+                "steps": result.steps,
+                "usage": result.usage,
+            })),
+            error: None,
+            execution_time: elapsed,
+            tokens_used: Some((result.usage.total_input_tokens + result.usage.total_output_tokens) as usize),
+            cost: None,
+        },
+        Err(e) => TaskResult {
+            success: false,
+            output: None,
+            error: Some(e.clone()),
+            execution_time: elapsed,
+            tokens_used: None,
+            cost: None,
+        },
+    };
+
+    // Complete task in state
+    {
+        let mut tasks = state.tasks.write().await;
+        if let Some(task) = tasks.get_mut(&task_id) {
+            task.status = if task_result.success { TaskStatus::Completed } else { TaskStatus::Failed };
+            task.result = Some(task_result.clone());
+            task.completed_at = Some(chrono::Utc::now().to_rfc3339());
+        }
+    }
+
+    // Update agent metrics
+    if let Some(ref aid) = agent_id {
+        let mut instances = state.instances.write().await;
+        if let Some(agent) = instances.get_mut(aid) {
+            agent.task_queue.retain(|id| id != &task_id);
+            agent.current_task_id = None;
+            agent.status = AgentStatus::Idle;
+            if task_result.success {
+                agent.metrics.tasks_completed += 1;
+            } else {
+                agent.metrics.tasks_failed += 1;
+            }
+            agent.metrics.total_execution_time += elapsed;
+            let total = agent.metrics.tasks_completed + agent.metrics.tasks_failed;
+            if total > 0 {
+                agent.metrics.average_execution_time = agent.metrics.total_execution_time / total as f64;
+                agent.metrics.success_rate = agent.metrics.tasks_completed as f64 / total as f64;
+            }
+            agent.metrics.last_updated = chrono::Utc::now().to_rfc3339();
+        }
+    }
+
+    let _ = app.emit("agent-orchestration", serde_json::json!({
+        "type": if task_result.success { "task_completed" } else { "task_failed" },
+        "task_id": task_id,
+        "agent_id": agent_id,
+        "execution_time": elapsed,
+    }));
+
+    match loop_result {
+        Ok(result) => Ok(serde_json::json!({
+            "success": true,
+            "task_id": task_id,
+            "final_answer": result.final_answer,
+            "iterations": result.total_iterations,
+            "usage": result.usage,
+        })),
+        Err(e) => Err(e),
+    }
+}
+
+/// Dispatch N parallel agent loops with different personas
+/// This is the core multi-agent orchestration: spawn multiple agents simultaneously
+#[tauri::command]
+pub async fn agent_dispatch_parallel(
+    request: MultiAgentRequest,
+    conversations: State<'_, Arc<AgentConversationState>>,
+    app: AppHandle,
+) -> Result<MultiAgentResult, String> {
+    let num_agents = request.agents.len();
+
+    let _ = app.emit("agent-orchestration", serde_json::json!({
+        "type": "parallel_dispatch_started",
+        "task": request.task,
+        "agent_count": num_agents,
+    }));
+
+    // Spawn all agent loops in parallel
+    let mut handles = Vec::new();
+
+    for agent_spec in &request.agents {
+        let task = format!(
+            "{}\n\n[You are: {} (Role: {})]\n{}",
+            request.task, agent_spec.name, agent_spec.role, agent_spec.system_prompt
+        );
+
+        let req = AgentLoopRequest {
+            task,
+            system_prompt: Some(agent_spec.system_prompt.clone()),
+            model_id: agent_spec.model_id.clone(),
+            provider: agent_spec.provider.clone(),
+            max_iterations: request.max_iterations.or(Some(15)),
+            working_dir: request.working_dir.clone(),
+            conversation_id: Some(format!("multi-{}-{}", agent_spec.id, uuid::Uuid::new_v4())),
+            mode: request.mode.clone(),
+            allowed_tools: agent_spec.allowed_tools.clone(),
+            project_id: None,
+        };
+
+        let convs = Arc::clone(&*conversations);
+        let app_c = app.clone();
+        let agent_id = agent_spec.id.clone();
+        let agent_name = agent_spec.name.clone();
+        let role = agent_spec.role.clone();
+
+        handles.push(tokio::spawn(async move {
+            let result = run_agent_loop(req, &convs, &app_c).await;
+            (agent_id, agent_name, role, result)
+        }));
+    }
+
+    // Collect results
+    let mut results = Vec::new();
+    let mut succeeded = 0usize;
+    let mut failed = 0usize;
+
+    for handle in handles {
+        match handle.await {
+            Ok((agent_id, agent_name, role, Ok(result))) => {
+                succeeded += 1;
+                results.push(AgentResultEntry {
+                    agent_id,
+                    agent_name,
+                    role,
+                    final_answer: result.final_answer,
+                    status: result.status,
+                    iterations: result.total_iterations,
+                    error: None,
+                });
+            }
+            Ok((agent_id, agent_name, role, Err(e))) => {
+                failed += 1;
+                results.push(AgentResultEntry {
+                    agent_id,
+                    agent_name,
+                    role,
+                    final_answer: String::new(),
+                    status: "failed".to_string(),
+                    iterations: 0,
+                    error: Some(e),
+                });
+            }
+            Err(e) => {
+                failed += 1;
+                results.push(AgentResultEntry {
+                    agent_id: "unknown".to_string(),
+                    agent_name: "unknown".to_string(),
+                    role: "unknown".to_string(),
+                    final_answer: String::new(),
+                    status: "panic".to_string(),
+                    iterations: 0,
+                    error: Some(format!("Task panicked: {e}")),
+                });
+            }
+        }
+    }
+
+    let _ = app.emit("agent-orchestration", serde_json::json!({
+        "type": "parallel_dispatch_completed",
+        "task": request.task,
+        "total": num_agents,
+        "succeeded": succeeded,
+        "failed": failed,
+    }));
+
+    Ok(MultiAgentResult {
+        task: request.task,
+        results,
+        total_agents: num_agents,
+        succeeded,
+        failed,
+    })
 }
 
 fn calculate_agent_score(

@@ -6,9 +6,12 @@ mod commands;
 mod state;
 
 use commands::agent::AgentOrchestratorState;
+use commands::agent_loop::AgentConversationState;
 use commands::collaboration::CollaborationState;
+use commands::execution::ExecutionTrackerState;
 use commands::marketplace::MarketplaceState;
 use commands::mcp::McpState;
+use commands::vector_store::VectorStoreState;
 use state::AppState;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -17,7 +20,7 @@ fn main() {
     tracing_subscriber::fmt::init();
 
     let data_dir = dirs_data_dir().unwrap_or_else(|| PathBuf::from("."));
-    let app_state = AppState::new(data_dir);
+    let app_state = AppState::new(data_dir.clone());
 
     // Initialize trace store
     if let Err(e) = app_state.init_trace_store() {
@@ -36,6 +39,32 @@ fn main() {
     // Initialize Marketplace state
     let marketplace_state = Arc::new(MarketplaceState::default());
 
+    // Initialize Agent Conversation state (with disk persistence)
+    let conversations_dir = data_dir.join("conversations");
+    let agent_conv_state = Arc::new(AgentConversationState::with_persist_dir(conversations_dir));
+
+    // Initialize Vector Store state (with persistence)
+    let vector_store_dir = data_dir.join("vector_store");
+    let vector_store_state = Arc::new(VectorStoreState::with_persist_dir(vector_store_dir));
+
+    // Initialize ProjectManager with SQLite persistence
+    {
+        let projects_db = data_dir.join("projects.db");
+        match hb_project::ProjectManager::open(&projects_db) {
+            Ok(pm) => {
+                let mut guard = app_state.project_manager.blocking_write();
+                *guard = pm;
+                tracing::info!("ProjectManager opened at {:?}", projects_db);
+            }
+            Err(e) => {
+                tracing::warn!("Failed to open ProjectManager: {e}");
+            }
+        }
+    }
+
+    // Initialize Execution Tracker state
+    let execution_tracker = Arc::new(ExecutionTrackerState::default());
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(app_state)
@@ -43,6 +72,9 @@ fn main() {
         .manage(agent_state)
         .manage(collab_state)
         .manage(marketplace_state)
+        .manage(agent_conv_state)
+        .manage(vector_store_state)
+        .manage(execution_tracker)
         .invoke_handler(tauri::generate_handler![
             // Workflow CRUD
             commands::workflow::create_workflow,
@@ -54,12 +86,14 @@ fn main() {
             commands::workflow::export_workflow_file,
             // Execution
             commands::execution::execute_workflow,
+            commands::execution::execute_agent_node,
             commands::execution::get_execution_status,
             commands::execution::cancel_execution,
             // Project management
             commands::project::create_project,
             commands::project::get_project,
             commands::project::list_projects,
+            commands::project::delete_project,
             // Tool registry
             commands::tool::list_tools,
             commands::tool::get_tool,
@@ -85,6 +119,7 @@ fn main() {
             commands::llm::test_llm_connection,
             commands::llm::list_llm_models,
             commands::llm::invoke_llm,
+            commands::llm::invoke_llm_stream,
             commands::llm::create_embedding,
             commands::llm::get_credential_status,
             // GIS
@@ -98,6 +133,8 @@ fn main() {
             commands::gis::gis_calculate_length,
             commands::gis::gis_property_statistics,
             commands::gis::gis_filter_features,
+            commands::gis::gis_transform_crs,
+            commands::gis::gis_buffer,
             // IFC
             commands::ifc::ifc_read_file,
             commands::ifc::ifc_parse_content,
@@ -109,6 +146,12 @@ fn main() {
             commands::ifc::ifc_get_statistics,
             commands::ifc::ifc_export_summary_json,
             commands::ifc::ifc_export_elements_csv,
+            commands::ifc::ifc_modify_entity,
+            commands::ifc::ifc_add_entity,
+            commands::ifc::ifc_remove_entity,
+            commands::ifc::ifc_clone_entity,
+            commands::ifc::ifc_write_file,
+            commands::ifc::ifc_merge_models,
             // MCP
             commands::mcp::mcp_add_server,
             commands::mcp::mcp_remove_server,
@@ -139,6 +182,8 @@ fn main() {
             commands::agent::agent_update_config,
             commands::agent::agent_get_config,
             commands::agent::agent_process_pending,
+            commands::agent::agent_execute_task,
+            commands::agent::agent_dispatch_parallel,
             // Collaboration
             commands::collaboration::collab_create_session,
             commands::collaboration::collab_join_session,
@@ -159,6 +204,37 @@ fn main() {
             commands::collaboration::collab_update_settings,
             commands::collaboration::collab_heartbeat,
             commands::collaboration::collab_close_session,
+            // System Tools (Claude Code level)
+            commands::system_tools::tool_bash_execute,
+            commands::system_tools::tool_file_read,
+            commands::system_tools::tool_file_write,
+            commands::system_tools::tool_file_edit,
+            commands::system_tools::tool_file_edit_lines,
+            commands::system_tools::tool_grep_search,
+            commands::system_tools::tool_glob_search,
+            commands::system_tools::tool_project_tree,
+            commands::system_tools::tool_web_fetch,
+            commands::system_tools::tool_web_search,
+            commands::system_tools::tool_git_status,
+            commands::system_tools::tool_git_diff,
+            commands::system_tools::tool_git_log,
+            commands::system_tools::tool_git_commit,
+            commands::system_tools::tool_memory_read,
+            commands::system_tools::tool_memory_write,
+            // Vector Store (RAG pipeline)
+            commands::vector_store::vector_create_collection,
+            commands::vector_store::vector_list_collections,
+            commands::vector_store::vector_delete_collection,
+            commands::vector_store::vector_store,
+            commands::vector_store::vector_search,
+            commands::vector_store::vector_collection_info,
+            commands::vector_store::vector_delete,
+            // Agent Loop (ReAct pattern)
+            commands::agent_loop::agent_run_loop,
+            commands::agent_loop::agent_cancel_loop,
+            commands::agent_loop::agent_list_conversations,
+            commands::agent_loop::agent_get_conversation,
+            commands::agent_loop::agent_clear_conversation,
             // Marketplace
             commands::marketplace::marketplace_search,
             commands::marketplace::marketplace_get_workflow,

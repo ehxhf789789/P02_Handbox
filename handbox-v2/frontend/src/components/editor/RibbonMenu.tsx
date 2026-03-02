@@ -1,5 +1,6 @@
 /**
  * RibbonMenu - Microsoft Office-style ribbon menu with tabs and grouped commands.
+ * Cleaned up: removed 21 disabled dummy buttons, merged duplicate AI interfaces.
  */
 
 import { useState } from 'react'
@@ -9,19 +10,19 @@ import { useExecution } from '@/hooks/useExecution'
 import { invoke } from '@tauri-apps/api/core'
 import {
   // Home tab icons
-  Play, Square, Plus, FolderOpen, Save, Download, Upload, Copy, Clipboard, Scissors,
+  Play, Square, Plus, FolderOpen, Save, Download,
   // AI tab icons
-  Sparkles, Settings, Brain, GitCompare, Wand2, Bot,
+  Sparkles, Settings, GitCompare,
   // Tools tab icons
-  Map, Box, Layers, Package, Server, Wrench, Puzzle,
+  Map, Box, Layers, Package, Server, Bug,
   // View tab icons
-  Terminal, Activity, Bug, Eye, Grid3x3, Maximize2, LayoutPanelLeft,
+  Terminal, Activity,
   // Data tab icons
-  Database, FileJson, FileSpreadsheet, Table, Filter,
+  Upload,
   // Collaboration tab icons
-  Users, Share2, MessageSquare, History, Cloud, ShoppingBag,
+  Users, ShoppingBag,
   // Common
-  Zap, Undo2, Redo2,
+  Zap,
 } from 'lucide-react'
 
 // Ribbon Tab types
@@ -29,7 +30,6 @@ type RibbonTab = 'home' | 'ai' | 'tools' | 'view' | 'data' | 'collaboration'
 
 interface RibbonMenuProps {
   onToggleExecPanel: () => void
-  onOpenCompiler?: () => void
   onOpenLLMSettings?: () => void
   onOpenPackManager?: () => void
   onOpenMCPConnections?: () => void
@@ -38,13 +38,12 @@ interface RibbonMenuProps {
   onOpenWorkflowLibrary?: () => void
   onSaveWorkflow?: () => void
   // GIS/IFC/Fusion
-  onOpenMcpPlugins?: () => void
   onOpenGisViewer?: () => void
   onOpenIfcViewer?: () => void
   onOpenFusionViewer?: () => void
   // Additional panels
   onOpenDebugPanel?: () => void
-  onOpenAgentPanel?: () => void
+  onOpenAgentChat?: () => void
   onOpenCollaboration?: () => void
   onOpenMarketplace?: () => void
 }
@@ -112,7 +111,6 @@ function RibbonGroup({ label, children }: { label: string; children: React.React
 
 export function RibbonMenu({
   onToggleExecPanel,
-  onOpenCompiler,
   onOpenLLMSettings,
   onOpenPackManager,
   onOpenMCPConnections,
@@ -120,12 +118,11 @@ export function RibbonMenu({
   onOpenModelComparison,
   onOpenWorkflowLibrary,
   onSaveWorkflow,
-  onOpenMcpPlugins,
   onOpenGisViewer,
   onOpenIfcViewer,
   onOpenFusionViewer,
   onOpenDebugPanel,
-  onOpenAgentPanel,
+  onOpenAgentChat,
   onOpenCollaboration,
   onOpenMarketplace,
 }: RibbonMenuProps) {
@@ -230,7 +227,6 @@ export function RibbonMenu({
         {/* HOME TAB */}
         {activeTab === 'home' && (
           <>
-            {/* Execution group */}
             <RibbonGroup label="실행">
               {!isRunning ? (
                 <RibbonButton
@@ -254,23 +250,11 @@ export function RibbonMenu({
 
             <RibbonSeparator />
 
-            {/* File group */}
             <RibbonGroup label="파일">
               <RibbonButton icon={Plus} label="새로 만들기" onClick={clearAll} />
               <RibbonButton icon={FolderOpen} label="열기" onClick={onOpenWorkflowLibrary} />
               <RibbonButton icon={Save} label="저장" onClick={onSaveWorkflow} disabled={nodes.length === 0} />
               <RibbonButton icon={Download} label="내보내기" onClick={handleExport} />
-            </RibbonGroup>
-
-            <RibbonSeparator />
-
-            {/* Edit group */}
-            <RibbonGroup label="편집">
-              <RibbonButton icon={Undo2} label="실행취소" disabled />
-              <RibbonButton icon={Redo2} label="다시실행" disabled />
-              <RibbonButton icon={Copy} label="복사" disabled />
-              <RibbonButton icon={Clipboard} label="붙여넣기" disabled />
-              <RibbonButton icon={Scissors} label="잘라내기" disabled />
             </RibbonGroup>
           </>
         )}
@@ -278,38 +262,21 @@ export function RibbonMenu({
         {/* AI TAB */}
         {activeTab === 'ai' && (
           <>
-            {/* AI Compiler group */}
-            <RibbonGroup label="AI 컴파일러">
+            <RibbonGroup label="AI Agent">
               <RibbonButton
                 icon={Sparkles}
-                label="AI 컴파일"
-                onClick={onOpenCompiler}
+                label="AI Agent"
+                onClick={onOpenAgentChat}
                 size="large"
                 color="text-violet-400 hover:bg-violet-900/30"
               />
-              <RibbonButton icon={Wand2} label="자동 최적화" disabled />
             </RibbonGroup>
 
             <RibbonSeparator />
 
-            {/* LLM Settings group */}
             <RibbonGroup label="LLM 설정">
               <RibbonButton icon={Settings} label="공급자 설정" onClick={onOpenLLMSettings} />
-              <RibbonButton icon={Brain} label="모델 선택" disabled />
               <RibbonButton icon={GitCompare} label="모델 비교" onClick={onOpenModelComparison} />
-            </RibbonGroup>
-
-            <RibbonSeparator />
-
-            {/* Agent group */}
-            <RibbonGroup label="에이전트">
-              <RibbonButton
-                icon={Bot}
-                label="AI 에이전트"
-                onClick={onOpenAgentPanel}
-                size="large"
-                color="text-blue-400 hover:bg-blue-900/30"
-              />
             </RibbonGroup>
           </>
         )}
@@ -317,7 +284,6 @@ export function RibbonMenu({
         {/* TOOLS TAB */}
         {activeTab === 'tools' && (
           <>
-            {/* Domain viewers group */}
             <RibbonGroup label="도메인 뷰어">
               <RibbonButton
                 icon={Map}
@@ -341,21 +307,13 @@ export function RibbonMenu({
 
             <RibbonSeparator />
 
-            {/* Extensions group */}
             <RibbonGroup label="확장">
-              <RibbonButton
-                icon={Package}
-                label="MCP 플러그인"
-                onClick={onOpenMcpPlugins}
-                color="text-emerald-400 hover:bg-emerald-900/30"
-              />
               <RibbonButton icon={Server} label="MCP 연결" onClick={onOpenMCPConnections} />
-              <RibbonButton icon={Puzzle} label="팩 관리" onClick={onOpenPackManager} />
+              <RibbonButton icon={Package} label="팩 관리" onClick={onOpenPackManager} />
             </RibbonGroup>
 
             <RibbonSeparator />
 
-            {/* Debug group */}
             <RibbonGroup label="디버그">
               <RibbonButton
                 icon={Bug}
@@ -363,7 +321,6 @@ export function RibbonMenu({
                 onClick={onOpenDebugPanel}
                 color="text-red-400 hover:bg-red-900/30"
               />
-              <RibbonButton icon={Wrench} label="도구 테스트" disabled />
             </RibbonGroup>
           </>
         )}
@@ -371,20 +328,9 @@ export function RibbonMenu({
         {/* VIEW TAB */}
         {activeTab === 'view' && (
           <>
-            {/* Panels group */}
             <RibbonGroup label="패널">
               <RibbonButton icon={Terminal} label="실행 패널" onClick={onToggleExecPanel} />
               <RibbonButton icon={Activity} label="트레이스" onClick={onToggleTraceViewer} />
-              <RibbonButton icon={LayoutPanelLeft} label="속성 패널" disabled />
-            </RibbonGroup>
-
-            <RibbonSeparator />
-
-            {/* Canvas group */}
-            <RibbonGroup label="캔버스">
-              <RibbonButton icon={Grid3x3} label="그리드 토글" disabled />
-              <RibbonButton icon={Maximize2} label="전체화면" disabled />
-              <RibbonButton icon={Eye} label="미니맵" disabled />
             </RibbonGroup>
           </>
         )}
@@ -392,27 +338,14 @@ export function RibbonMenu({
         {/* DATA TAB */}
         {activeTab === 'data' && (
           <>
-            {/* Import group */}
             <RibbonGroup label="가져오기">
               <RibbonButton icon={Upload} label="워크플로우" onClick={onOpenWorkflowLibrary} />
-              <RibbonButton icon={FileJson} label="JSON" disabled />
-              <RibbonButton icon={FileSpreadsheet} label="CSV/Excel" disabled />
             </RibbonGroup>
 
             <RibbonSeparator />
 
-            {/* Export group */}
             <RibbonGroup label="내보내기">
               <RibbonButton icon={Download} label="JSON" onClick={handleExport} />
-              <RibbonButton icon={Table} label="결과 테이블" disabled />
-            </RibbonGroup>
-
-            <RibbonSeparator />
-
-            {/* Database group */}
-            <RibbonGroup label="데이터베이스">
-              <RibbonButton icon={Database} label="연결 관리" disabled />
-              <RibbonButton icon={Filter} label="쿼리 빌더" disabled />
             </RibbonGroup>
           </>
         )}
@@ -420,7 +353,6 @@ export function RibbonMenu({
         {/* COLLABORATION TAB */}
         {activeTab === 'collaboration' && (
           <>
-            {/* Team group */}
             <RibbonGroup label="팀">
               <RibbonButton
                 icon={Users}
@@ -429,20 +361,10 @@ export function RibbonMenu({
                 size="large"
                 color="text-yellow-400 hover:bg-yellow-900/30"
               />
-              <RibbonButton icon={Share2} label="공유" disabled />
             </RibbonGroup>
 
             <RibbonSeparator />
 
-            {/* Communication group */}
-            <RibbonGroup label="커뮤니케이션">
-              <RibbonButton icon={MessageSquare} label="댓글" disabled />
-              <RibbonButton icon={History} label="변경 내역" disabled />
-            </RibbonGroup>
-
-            <RibbonSeparator />
-
-            {/* Marketplace group */}
             <RibbonGroup label="마켓플레이스">
               <RibbonButton
                 icon={ShoppingBag}
@@ -451,7 +373,6 @@ export function RibbonMenu({
                 size="large"
                 color="text-pink-400 hover:bg-pink-900/30"
               />
-              <RibbonButton icon={Cloud} label="템플릿" disabled />
             </RibbonGroup>
           </>
         )}
