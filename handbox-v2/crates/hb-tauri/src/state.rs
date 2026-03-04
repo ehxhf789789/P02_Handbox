@@ -23,6 +23,9 @@ pub struct LLMCredentials {
     pub openai_api_key: Option<String>,
     pub anthropic_api_key: Option<String>,
     pub local_endpoint: Option<String>,
+    /// Active LLM provider selected by the user: "bedrock"|"openai"|"anthropic"|"local"
+    #[serde(default)]
+    pub active_provider: Option<String>,
 }
 
 impl LLMCredentials {
@@ -65,6 +68,9 @@ pub struct AppState {
     /// LLM credentials (persistent storage).
     pub llm_credentials: Arc<RwLock<LLMCredentials>>,
 
+    /// Execution plans for Plan → Execute pipeline
+    pub execution_plans: Arc<RwLock<HashMap<String, crate::commands::agent_loop::ExecutionPlan>>>,
+
     /// Data directory for the app.
     pub data_dir: PathBuf,
 }
@@ -102,6 +108,7 @@ impl AppState {
             project_manager: Arc::new(RwLock::new(ProjectManager::new())),
             workflows: Arc::new(RwLock::new(HashMap::new())),
             llm_credentials: Arc::new(RwLock::new(credentials)),
+            execution_plans: Arc::new(RwLock::new(HashMap::new())),
             data_dir,
         }
     }

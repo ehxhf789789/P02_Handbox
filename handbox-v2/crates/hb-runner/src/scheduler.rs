@@ -67,6 +67,8 @@ pub struct ExecutionContext {
     pub agent_executor: Option<AgentTaskExecutor>,
     /// Optional trace store for persisting NodeSpan records.
     pub trace_store: Option<Arc<hb_trace::store::TraceStore>>,
+    /// Explicit LLM provider to use for workflow node execution.
+    pub llm_provider: Option<String>,
 }
 
 impl Default for ExecutionContext {
@@ -79,6 +81,7 @@ impl Default for ExecutionContext {
             fail_fast: true, // Default to stopping on first error
             agent_executor: None,
             trace_store: None,
+            llm_provider: None,
         }
     }
 }
@@ -122,6 +125,12 @@ impl ExecutionContext {
     /// Set the trace store for persisting execution spans.
     pub fn with_trace_store(mut self, store: Arc<hb_trace::store::TraceStore>) -> Self {
         self.trace_store = Some(store);
+        self
+    }
+
+    /// Set the LLM provider for workflow node execution.
+    pub fn with_llm_provider(mut self, provider: String) -> Self {
+        self.llm_provider = Some(provider);
         self
     }
 
@@ -224,8 +233,16 @@ pub async fn run_dag_with_context(
                 duration_ms: None,
             });
 
-            // Gather inputs from upstream edges
+            // Gather inputs from upstream edges.
+            // When multiple edges target the same port, collect values into an array.
             let mut inputs = serde_json::Map::new();
+            // Track which ports have multiple incoming edges
+            let mut port_edge_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+            for edge in &edges {
+                if edge.target_node == *node_id && edge.kind == EdgeKind::Data {
+                    *port_edge_counts.entry(edge.target_port.clone()).or_insert(0) += 1;
+                }
+            }
             for edge in &edges {
                 if edge.target_node == *node_id && edge.kind == EdgeKind::Data {
                     tracing::debug!(
@@ -238,19 +255,39 @@ pub async fn run_dag_with_context(
                             "[Scheduler] Source output keys: {:?}",
                             val.as_object().map(|o| o.keys().collect::<Vec<_>>())
                         );
-                        if let Some(port_val) = val.get(&edge.source_port) {
+                        let new_val = if let Some(port_val) = val.get(&edge.source_port) {
                             tracing::info!(
                                 "[Scheduler] Mapped {} -> {} (len: {} chars)",
                                 edge.source_port, edge.target_port,
                                 port_val.as_str().map(|s| s.len()).unwrap_or(0)
                             );
-                            inputs.insert(edge.target_port.clone(), port_val.clone());
+                            port_val.clone()
                         } else {
                             tracing::warn!(
                                 "[Scheduler] Port '{}' not found in output, using full output",
                                 edge.source_port
                             );
-                            inputs.insert(edge.target_port.clone(), val.clone());
+                            val.clone()
+                        };
+
+                        let multi = port_edge_counts.get(&edge.target_port).copied().unwrap_or(1) > 1;
+                        if multi {
+                            // Multiple edges → collect into array
+                            match inputs.get_mut(&edge.target_port) {
+                                Some(serde_json::Value::Array(arr)) => {
+                                    arr.push(new_val);
+                                }
+                                Some(existing) => {
+                                    let prev = existing.clone();
+                                    *existing = serde_json::Value::Array(vec![prev, new_val]);
+                                }
+                                None => {
+                                    inputs.insert(edge.target_port.clone(), serde_json::Value::Array(vec![new_val]));
+                                }
+                            }
+                        } else {
+                            // Single edge → insert directly (backward compatible)
+                            inputs.insert(edge.target_port.clone(), new_val);
                         }
                     } else {
                         tracing::warn!(
@@ -458,7 +495,7 @@ async fn execute_primitive_node(
         } else if tool_ref.starts_with("mcp://") {
             execute_mcp_tool(tool_ref, &input_json, &config_json, ctx.mcp_cache.clone()).await
         } else {
-            execute_native_tool(tool_ref, &input_json, &config_json).await
+            execute_native_tool(tool_ref, &input_json, &config_json, ctx.llm_provider.as_deref()).await
         };
 
         if status == ExecutionStatus::Completed {
@@ -932,11 +969,13 @@ async fn execute_native_tool(
     tool_ref: &str,
     input_json: &serde_json::Value,
     config_json: &serde_json::Value,
+    llm_provider: Option<&str>,
 ) -> (serde_json::Value, ExecutionStatus, Option<String>, i64) {
     let tool_input = ToolInput {
         tool_ref: tool_ref.to_string(),
         inputs: input_json.clone(),
         config: config_json.clone(),
+        llm_provider: llm_provider.map(|s| s.to_string()),
     };
 
     let runtime = RuntimeSpec::Native;

@@ -32,6 +32,7 @@ interface WorkflowEdgeDef {
 
 interface WorkflowUpdateEvent {
   type: 'create' | 'add_node' | 'remove_node' | 'connect' | 'set_config' | 'select_node'
+    | 'update_node' | 'remove_edge' | 'list_request'
   // create
   nodes?: WorkflowNodeDef[]
   edges?: WorkflowEdgeDef[]
@@ -41,13 +42,15 @@ interface WorkflowUpdateEvent {
   label?: string
   config?: Record<string, unknown>
   position?: { x: number; y: number }
-  // remove_node / set_config / select_node
+  // remove_node / set_config / select_node / update_node
   node_id?: string
-  // connect
+  // connect / remove_edge
   source?: string
   source_port?: string
   target?: string
   target_port?: string
+  // remove_edge
+  edge_id?: string
 }
 
 let agentNodeCounter = 1000
@@ -380,7 +383,81 @@ export async function setupAgentCanvasListener(): Promise<() => void> {
         }
         break
       }
+
+      case 'update_node': {
+        if (payload.node_id) {
+          // Update label if provided
+          if (payload.label) {
+            store.updateNodeLabel(payload.node_id, payload.label)
+          }
+          // Update position if provided
+          if (payload.position) {
+            const { nodes } = store
+            const updated = nodes.map(n =>
+              n.id === payload.node_id
+                ? { ...n, position: payload.position! }
+                : n
+            )
+            useWorkflowStore.setState({ nodes: updated })
+          }
+          // Select the updated node for visual feedback
+          store.selectNode(payload.node_id)
+        }
+        break
+      }
+
+      case 'remove_edge': {
+        const { edges } = store
+        if (payload.edge_id) {
+          // Remove by exact edge ID
+          store.removeEdge(payload.edge_id)
+        } else if (payload.source && payload.target) {
+          // Remove by source + target match
+          const match = edges.find(e =>
+            e.source === payload.source && e.target === payload.target
+          )
+          if (match) {
+            store.removeEdge(match.id)
+          }
+        }
+        break
+      }
+
+      case 'list_request': {
+        // Respond with current canvas state summary
+        const { nodes, edges } = store
+        const summary = {
+          node_count: nodes.length,
+          edge_count: edges.length,
+          nodes: nodes.map(n => ({
+            id: n.id,
+            label: (n.data as NodeData).label,
+            toolRef: (n.data as NodeData).toolRef,
+            position: n.position,
+          })),
+          edges: edges.map(e => ({
+            id: e.id,
+            source: e.source,
+            target: e.target,
+            sourceHandle: e.sourceHandle,
+            targetHandle: e.targetHandle,
+          })),
+        }
+        // Emit response back to Rust backend
+        import('@tauri-apps/api/event').then(({ emit }) => {
+          emit('workflow-list-response', JSON.stringify(summary))
+        }).catch(err => console.error('[AgentCanvasBridge] Failed to emit list response:', err))
+        break
+      }
     }
+  })
+
+  // Workflow execute listener: agent requests canvas execution
+  const unlistenExecute = await safeListen<{ source: string; conversation_id?: string }>('workflow-execute-request', () => {
+    // Dynamically import to avoid circular dependency; fire-and-forget with error logging
+    import('@/services/canvasExecutor').then(({ executeCanvasWorkflow }) => {
+      executeCanvasWorkflow().catch(err => console.error('[AgentCanvasBridge] Workflow execution failed:', err))
+    }).catch(err => console.error('[AgentCanvasBridge] Failed to import canvasExecutor:', err))
   })
 
   // Agent stream listener: highlight canvas nodes when agent calls matching tools
@@ -410,6 +487,7 @@ export async function setupAgentCanvasListener(): Promise<() => void> {
 
   return () => {
     unlistenWorkflow()
+    unlistenExecute()
     unlistenAgent()
     if (highlightTimer) clearTimeout(highlightTimer)
   }

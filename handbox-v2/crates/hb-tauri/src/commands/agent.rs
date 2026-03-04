@@ -903,6 +903,8 @@ pub async fn agent_execute_task(
         conversation_id: Some(format!("orch-task-{}", task_id)),
         mode: task_payload["mode"].as_str().map(String::from),
         allowed_tools: None,
+        pinned_tools: None,
+        excluded_tools: None,
         project_id: None,
     };
 
@@ -1022,6 +1024,8 @@ pub async fn agent_dispatch_parallel(
             conversation_id: Some(format!("multi-{}-{}", agent_spec.id, uuid::Uuid::new_v4())),
             mode: request.mode.clone(),
             allowed_tools: agent_spec.allowed_tools.clone(),
+            pinned_tools: None,
+            excluded_tools: None,
             project_id: None,
         };
 

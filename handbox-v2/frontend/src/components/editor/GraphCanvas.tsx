@@ -17,6 +17,7 @@ import { PrimitiveNode } from './PrimitiveNode'
 import { CompositeNode } from './CompositeNode'
 import { InlineNodeEditor } from './InlineNodeEditor'
 import { NodeContextMenu } from './NodeContextMenu'
+import { FullscreenPreviewModal } from './previews/FullscreenPreviewModal'
 import { useWorkflowStore, type NodeData } from '@/stores/workflowStore'
 import { useExecutionStore } from '@/stores/executionStore'
 import { getToolDef, getCategoryColor } from '@/data/toolCatalog'
@@ -523,6 +524,9 @@ export function GraphCanvas() {
           </div>
         )
       })()}
+
+      {/* Fullscreen preview modal */}
+      <FullscreenPreviewModal />
     </div>
   )
 }

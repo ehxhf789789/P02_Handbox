@@ -28,6 +28,10 @@ pub struct ToolInput {
     pub tool_ref: String,
     pub inputs: serde_json::Value,
     pub config: serde_json::Value,
+    /// Explicit LLM provider hint: "bedrock"|"openai"|"anthropic"|"local".
+    /// When set, LLM tools use this provider instead of auto-detecting from env vars.
+    #[serde(default)]
+    pub llm_provider: Option<String>,
 }
 
 /// Output returned from a tool executor.

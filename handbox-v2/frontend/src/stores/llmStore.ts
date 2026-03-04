@@ -145,7 +145,11 @@ export const useLLMStore = create<LLMState>()(
       isConnecting: false,
       isInvoking: false,
 
-      setActiveProvider: (provider) => set({ activeProvider: provider }),
+      setActiveProvider: (provider) => {
+        set({ activeProvider: provider })
+        // Sync active provider to backend for workflow/agent execution
+        safeInvoke('set_active_llm_provider', { provider }).catch(() => {})
+      },
 
       setSelectedModel: (provider, modelId) =>
         set((state) => ({
@@ -232,6 +236,9 @@ export const useLLMStore = create<LLMState>()(
               config: { ...state.config, local: { endpoint: status.local_endpoint! } },
             }))
           }
+          // Sync active provider to backend on startup
+          const currentProvider = get().activeProvider
+          safeInvoke('set_active_llm_provider', { provider: currentProvider }).catch(() => {})
           return status
         } catch (error) {
           console.error('Failed to load credential status:', error)

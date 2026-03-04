@@ -73,12 +73,24 @@ pub async fn execute_workflow(
         }
     };
 
+    // Inject active LLM provider from user settings
+    let ctx = {
+        let creds = state.llm_credentials.read().await;
+        if let Some(ref provider) = creds.active_provider {
+            ctx.with_llm_provider(provider.clone())
+        } else {
+            ctx
+        }
+    };
+
     // Inject agent task executor so agent-task nodes run the real agent loop
+    let resolved_provider = state.llm_credentials.read().await.active_provider.clone();
     let conversations_arc = conversations.inner().clone();
     let app_for_agent = app.clone();
     let ctx = ctx.with_agent_executor(move |params: AgentTaskParams| {
         let convs = conversations_arc.clone();
         let app = app_for_agent.clone();
+        let provider_for_agent = resolved_provider.clone();
         Box::pin(async move {
             // Build task string: prompt + context
             let task = if params.context.is_null() || params.context == json!({}) {
@@ -93,12 +105,14 @@ pub async fn execute_workflow(
                 task,
                 system_prompt: None,
                 model_id: None,
-                provider: None,
+                provider: provider_for_agent,
                 max_iterations: params.max_iterations,
                 working_dir: None,
                 conversation_id: Some(format!("wf-dag-{}", params.node_id)),
                 mode: params.mode,
                 allowed_tools: None,
+                pinned_tools: None,
+                excluded_tools: None,
                 project_id: None,
             };
 
@@ -230,6 +244,8 @@ pub async fn execute_agent_node(
         conversation_id: Some(format!("wf-node-{node_id}")),
         mode,
         allowed_tools: None,
+        pinned_tools: None,
+        excluded_tools: None,
         project_id: None,
     };
 

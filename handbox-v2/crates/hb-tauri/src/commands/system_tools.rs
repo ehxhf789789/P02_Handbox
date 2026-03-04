@@ -962,6 +962,93 @@ pub async fn tool_web_fetch(
     }))
 }
 
+/// Full HTTP client (GET/POST/PUT/DELETE/PATCH) with custom headers, body, and query parameters
+#[tauri::command]
+pub async fn tool_http_request(
+    url: String,
+    method: Option<String>,
+    headers: Option<serde_json::Value>,
+    body: Option<String>,
+    params: Option<serde_json::Value>,
+    timeout_ms: Option<u64>,
+    max_chars: Option<usize>,
+) -> Result<serde_json::Value, String> {
+    let method_str = method.unwrap_or_else(|| "GET".to_string()).to_uppercase();
+    let timeout = std::time::Duration::from_millis(timeout_ms.unwrap_or(30_000).min(120_000));
+    let max = max_chars.unwrap_or(100_000);
+    let start = std::time::Instant::now();
+
+    let client = reqwest::Client::builder()
+        .timeout(timeout)
+        .user_agent("Handbox/2.0 (Desktop Agent)")
+        .build()
+        .map_err(|e| format!("Client error: {e}"))?;
+
+    // Build URL with query params
+    let mut url_parsed = url::Url::parse(&url).map_err(|e| format!("Invalid URL: {e}"))?;
+    if let Some(ref p) = params {
+        if let Some(obj) = p.as_object() {
+            let mut pairs = url_parsed.query_pairs_mut();
+            for (k, v) in obj {
+                pairs.append_pair(k, v.as_str().unwrap_or(&v.to_string()));
+            }
+        }
+    }
+
+    let mut req_builder = match method_str.as_str() {
+        "POST" => client.post(url_parsed.as_str()),
+        "PUT" => client.put(url_parsed.as_str()),
+        "DELETE" => client.delete(url_parsed.as_str()),
+        "PATCH" => client.patch(url_parsed.as_str()),
+        _ => client.get(url_parsed.as_str()),
+    };
+
+    if let Some(ref h) = headers {
+        if let Some(obj) = h.as_object() {
+            for (k, v) in obj {
+                req_builder = req_builder.header(k.as_str(), v.as_str().unwrap_or(&v.to_string()));
+            }
+        }
+    }
+
+    if let Some(ref b) = body {
+        req_builder = req_builder.body(b.clone());
+        // Auto-set Content-Type if not provided
+        if headers.as_ref().and_then(|h| h.get("Content-Type")).is_none()
+            && headers.as_ref().and_then(|h| h.get("content-type")).is_none()
+        {
+            req_builder = req_builder.header("Content-Type", "application/json");
+        }
+    }
+
+    let resp = req_builder.send().await.map_err(|e| format!("Request error: {e}"))?;
+    let status = resp.status().as_u16();
+    let resp_headers: serde_json::Value = resp.headers().iter()
+        .map(|(k, v)| (k.as_str().to_string(), serde_json::json!(v.to_str().unwrap_or(""))))
+        .collect::<serde_json::Map<String, serde_json::Value>>()
+        .into();
+
+    let raw_body = resp.text().await.map_err(|e| format!("Read error: {e}"))?;
+    let truncated = raw_body.len() > max;
+    let final_body: String = raw_body.chars().take(max).collect();
+    let elapsed = start.elapsed().as_millis();
+
+    let response_json = serde_json::from_str::<serde_json::Value>(&final_body).ok();
+
+    Ok(serde_json::json!({
+        "text": final_body,
+        "status": status,
+        "headers": resp_headers,
+        "url": url_parsed.as_str(),
+        "method": method_str,
+        "chars": final_body.len(),
+        "truncated": truncated,
+        "elapsed_ms": elapsed,
+        "is_json": response_json.is_some(),
+        "response_json": response_json,
+    }))
+}
+
 fn html_to_text(html: &str) -> String {
     let mut result = String::with_capacity(html.len() / 3);
     let mut in_tag = false;
@@ -1542,6 +1629,674 @@ fn get_memory_dir() -> Result<PathBuf, String> {
             .map(|p| p.join("handbox").join("agent_memory"))
             .ok_or_else(|| "Data dir not found".to_string())
     }
+}
+
+// ============================================================
+// Web Crawling — recursive BFS crawl with DOM parsing
+// ============================================================
+
+pub async fn tool_web_crawl(
+    url: String,
+    max_depth: Option<usize>,
+    max_pages: Option<usize>,
+    selector: Option<String>,
+    follow_pattern: Option<String>,
+    _respect_robots: Option<bool>,
+) -> Result<Value, String> {
+    use scraper::{Html, Selector};
+    use std::collections::{HashSet, VecDeque};
+
+    let max_depth = max_depth.unwrap_or(2);
+    let max_pages = max_pages.unwrap_or(10);
+    let content_selector = selector.unwrap_or_else(|| "body".to_string());
+    let follow_regex = follow_pattern.as_ref().and_then(|p| regex_lite::Regex::new(p).ok());
+
+    let base_url = url::Url::parse(&url).map_err(|e| format!("Invalid URL: {e}"))?;
+    let base_domain = base_url.host_str().unwrap_or("").to_string();
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .user_agent("Handbox/2.0 Research Crawler")
+        .build()
+        .map_err(|e| format!("Client build failed: {e}"))?;
+
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut queue: VecDeque<(String, usize)> = VecDeque::new();
+    let mut results: Vec<Value> = Vec::new();
+
+    queue.push_back((url.clone(), 0));
+    visited.insert(url.clone());
+
+    while let Some((current_url, depth)) = queue.pop_front() {
+        if results.len() >= max_pages { break; }
+
+        let response = match client.get(&current_url).send().await {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        let status = response.status().as_u16();
+        let body = response.text().await.unwrap_or_default();
+        let document = Html::parse_document(&body);
+
+        // Extract content via selector
+        let content = if let Ok(sel) = Selector::parse(&content_selector) {
+            document.select(&sel)
+                .map(|el| el.text().collect::<Vec<_>>().join(" "))
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            document.root_element().text().collect::<Vec<_>>().join(" ")
+        };
+
+        // Extract title
+        let title = Selector::parse("title").ok()
+            .and_then(|sel| document.select(&sel).next())
+            .map(|el| el.text().collect::<String>())
+            .unwrap_or_default();
+
+        // Extract links for further crawling
+        let mut links_found = Vec::new();
+        if depth < max_depth {
+            if let Ok(a_sel) = Selector::parse("a[href]") {
+                for el in document.select(&a_sel) {
+                    if let Some(href) = el.value().attr("href") {
+                        let resolved = base_url.join(href).ok();
+                        if let Some(link_url) = resolved {
+                            let link_str = link_url.to_string();
+                            let same_domain = link_url.host_str() == Some(base_domain.as_str());
+                            let matches_pattern = follow_regex.as_ref()
+                                .map(|r| r.is_match(&link_str))
+                                .unwrap_or(true);
+                            if same_domain && matches_pattern && !visited.contains(&link_str) {
+                                visited.insert(link_str.clone());
+                                links_found.push(link_str.clone());
+                                queue.push_back((link_str, depth + 1));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Truncate content to reasonable size
+        let content_truncated = if content.len() > 5000 {
+            format!("{}... [truncated]", &content[..5000])
+        } else {
+            content
+        };
+
+        results.push(json!({
+            "url": current_url,
+            "title": title,
+            "status": status,
+            "content": content_truncated,
+            "links_found": links_found.len(),
+            "depth": depth,
+        }));
+    }
+
+    let summary = format!("Crawled {} pages from {}", results.len(), base_domain);
+    Ok(json!({
+        "pages": results,
+        "total_pages": results.len(),
+        "text": summary,
+    }))
+}
+
+// ============================================================
+// File Download — download URL to local file
+// ============================================================
+
+pub async fn tool_file_download(
+    url: String,
+    output_path: Option<String>,
+    _overwrite: Option<bool>,
+) -> Result<Value, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| format!("Client build failed: {e}"))?;
+
+    let response = client.get(&url).send().await
+        .map_err(|e| format!("Download failed: {e}"))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("HTTP {}: download failed", status));
+    }
+
+    // Determine filename
+    let content_type = response.headers()
+        .get("content-type")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("application/octet-stream")
+        .to_string();
+
+    let filename = output_path.unwrap_or_else(|| {
+        // Try Content-Disposition header
+        response.headers()
+            .get("content-disposition")
+            .and_then(|h| h.to_str().ok())
+            .and_then(|s| {
+                s.split("filename=").nth(1)
+                    .map(|f| f.trim_matches('"').to_string())
+            })
+            .unwrap_or_else(|| {
+                // Fallback: extract from URL path
+                url::Url::parse(&url).ok()
+                    .and_then(|u| u.path_segments()?.last().map(|s| s.to_string()))
+                    .unwrap_or_else(|| "download".to_string())
+            })
+    });
+
+    let bytes = response.bytes().await
+        .map_err(|e| format!("Failed to read response body: {e}"))?;
+    let size = bytes.len();
+
+    tokio::fs::write(&filename, &bytes).await
+        .map_err(|e| format!("Failed to write file: {e}"))?;
+
+    Ok(json!({
+        "path": filename,
+        "size_bytes": size,
+        "content_type": content_type,
+        "text": format!("Downloaded {} ({} bytes) to {}", url, size, filename),
+    }))
+}
+
+// ============================================================
+// Archive — compress/decompress ZIP and tar.gz
+// ============================================================
+
+pub async fn tool_archive_compress(
+    source_path: String,
+    output_path: String,
+    format: Option<String>,
+) -> Result<Value, String> {
+    let fmt = format.unwrap_or_else(|| {
+        if output_path.ends_with(".tar.gz") || output_path.ends_with(".tgz") {
+            "tar.gz".to_string()
+        } else {
+            "zip".to_string()
+        }
+    });
+
+    let source = std::path::Path::new(&source_path);
+    if !source.exists() {
+        return Err(format!("Source path not found: {source_path}"));
+    }
+
+    match fmt.as_str() {
+        "zip" => {
+            let file = std::fs::File::create(&output_path)
+                .map_err(|e| format!("Cannot create output: {e}"))?;
+            let mut zip = zip::ZipWriter::new(file);
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+
+            if source.is_dir() {
+                fn add_dir(zip: &mut zip::ZipWriter<std::fs::File>, base: &std::path::Path, current: &std::path::Path, opts: zip::write::SimpleFileOptions) -> Result<(), String> {
+                    for entry in std::fs::read_dir(current).map_err(|e| e.to_string())? {
+                        let entry = entry.map_err(|e| e.to_string())?;
+                        let path = entry.path();
+                        let rel = path.strip_prefix(base).unwrap_or(&path);
+                        let name = rel.to_string_lossy().replace('\\', "/");
+                        if path.is_dir() {
+                            zip.add_directory(&name, opts).map_err(|e| e.to_string())?;
+                            add_dir(zip, base, &path, opts)?;
+                        } else {
+                            zip.start_file(&name, opts).map_err(|e| e.to_string())?;
+                            let data = std::fs::read(&path).map_err(|e| e.to_string())?;
+                            std::io::Write::write_all(zip, &data).map_err(|e| e.to_string())?;
+                        }
+                    }
+                    Ok(())
+                }
+                add_dir(&mut zip, source, source, options)?;
+            } else {
+                let name = source.file_name().unwrap_or_default().to_string_lossy();
+                zip.start_file(name.as_ref(), options).map_err(|e| e.to_string())?;
+                let data = std::fs::read(source).map_err(|e| e.to_string())?;
+                std::io::Write::write_all(&mut zip, &data).map_err(|e| e.to_string())?;
+            }
+            zip.finish().map_err(|e| e.to_string())?;
+        }
+        "tar.gz" | "tgz" => {
+            let file = std::fs::File::create(&output_path)
+                .map_err(|e| format!("Cannot create output: {e}"))?;
+            let enc = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+            let mut tar = tar::Builder::new(enc);
+
+            if source.is_dir() {
+                tar.append_dir_all(".", source).map_err(|e| e.to_string())?;
+            } else {
+                let name = source.file_name().unwrap_or_default();
+                tar.append_path_with_name(source, name).map_err(|e| e.to_string())?;
+            }
+            tar.into_inner().map_err(|e| e.to_string())?
+                .finish().map_err(|e| e.to_string())?;
+        }
+        _ => return Err(format!("Unsupported format: {fmt}. Use 'zip' or 'tar.gz'.")),
+    }
+
+    let size = std::fs::metadata(&output_path).map(|m| m.len()).unwrap_or(0);
+    Ok(json!({
+        "path": output_path,
+        "format": fmt,
+        "size_bytes": size,
+        "text": format!("Compressed {} → {} ({} bytes)", source_path, output_path, size),
+    }))
+}
+
+pub async fn tool_archive_decompress(
+    archive_path: String,
+    output_dir: Option<String>,
+) -> Result<Value, String> {
+    let archive = std::path::Path::new(&archive_path);
+    if !archive.exists() {
+        return Err(format!("Archive not found: {archive_path}"));
+    }
+
+    let out_dir = output_dir.unwrap_or_else(|| {
+        archive.parent().map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| ".".to_string())
+    });
+    tokio::fs::create_dir_all(&out_dir).await.map_err(|e| e.to_string())?;
+
+    let ext = archive_path.to_lowercase();
+    let mut extracted_files = Vec::new();
+
+    if ext.ends_with(".zip") {
+        let file = std::fs::File::open(archive).map_err(|e| e.to_string())?;
+        let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+        for i in 0..zip.len() {
+            let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
+            let name = entry.name().to_string();
+            let out_path = std::path::Path::new(&out_dir).join(&name);
+            if entry.is_dir() {
+                std::fs::create_dir_all(&out_path).map_err(|e| e.to_string())?;
+            } else {
+                if let Some(parent) = out_path.parent() {
+                    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                }
+                let mut out_file = std::fs::File::create(&out_path).map_err(|e| e.to_string())?;
+                std::io::copy(&mut entry, &mut out_file).map_err(|e| e.to_string())?;
+                extracted_files.push(name);
+            }
+        }
+    } else if ext.ends_with(".tar.gz") || ext.ends_with(".tgz") {
+        let file = std::fs::File::open(archive).map_err(|e| e.to_string())?;
+        let dec = flate2::read::GzDecoder::new(file);
+        let mut tar = tar::Archive::new(dec);
+        for entry in tar.entries().map_err(|e| e.to_string())? {
+            let mut entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path().map_err(|e| e.to_string())?.to_path_buf();
+            let name = path.to_string_lossy().to_string();
+            entry.unpack_in(&out_dir).map_err(|e| e.to_string())?;
+            extracted_files.push(name);
+        }
+    } else {
+        return Err(format!("Unsupported archive format. Use .zip or .tar.gz"));
+    }
+
+    Ok(json!({
+        "output_dir": out_dir,
+        "files": extracted_files,
+        "total_files": extracted_files.len(),
+        "text": format!("Extracted {} files to {}", extracted_files.len(), out_dir),
+    }))
+}
+
+pub async fn tool_archive_list(
+    archive_path: String,
+) -> Result<Value, String> {
+    let archive = std::path::Path::new(&archive_path);
+    if !archive.exists() {
+        return Err(format!("Archive not found: {archive_path}"));
+    }
+
+    let ext = archive_path.to_lowercase();
+    let mut entries = Vec::new();
+
+    if ext.ends_with(".zip") {
+        let file = std::fs::File::open(archive).map_err(|e| e.to_string())?;
+        let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+        for i in 0..zip.len() {
+            let entry = zip.by_index_raw(i).map_err(|e| e.to_string())?;
+            entries.push(json!({
+                "name": entry.name(),
+                "size": entry.size(),
+                "compressed_size": entry.compressed_size(),
+                "is_dir": entry.is_dir(),
+            }));
+        }
+    } else if ext.ends_with(".tar.gz") || ext.ends_with(".tgz") {
+        let file = std::fs::File::open(archive).map_err(|e| e.to_string())?;
+        let dec = flate2::read::GzDecoder::new(file);
+        let mut tar = tar::Archive::new(dec);
+        for entry in tar.entries().map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path().map_err(|e| e.to_string())?;
+            entries.push(json!({
+                "name": path.to_string_lossy(),
+                "size": entry.size(),
+                "is_dir": entry.header().entry_type().is_dir(),
+            }));
+        }
+    } else {
+        return Err("Unsupported archive format".to_string());
+    }
+
+    Ok(json!({
+        "entries": entries,
+        "total": entries.len(),
+        "text": format!("{} entries in {}", entries.len(), archive_path),
+    }))
+}
+
+// ============================================================
+// Database — SQLite + PostgreSQL query execution
+// ============================================================
+
+pub async fn tool_db_query(
+    db_type: String,
+    connection: String,
+    query: String,
+    params: Option<Vec<Value>>,
+) -> Result<Value, String> {
+    // Safety check for destructive queries
+    let query_upper = query.to_uppercase();
+    let dangerous = ["DROP TABLE", "DROP DATABASE", "TRUNCATE", "DELETE FROM", "ALTER TABLE"];
+    for pattern in &dangerous {
+        if query_upper.contains(pattern) {
+            return Err(format!("Dangerous SQL operation blocked: {pattern}. Use with caution."));
+        }
+    }
+
+    match db_type.as_str() {
+        "sqlite" => {
+            let conn = rusqlite::Connection::open(&connection)
+                .map_err(|e| format!("SQLite open failed: {e}"))?;
+
+            let mut stmt = conn.prepare(&query)
+                .map_err(|e| format!("SQL prepare failed: {e}"))?;
+
+            let column_count = stmt.column_count();
+            let column_names: Vec<String> = (0..column_count)
+                .map(|i| stmt.column_name(i).unwrap_or("?").to_string())
+                .collect();
+
+            let param_values: Vec<Box<dyn rusqlite::types::ToSql>> = params.as_ref()
+                .map(|p| p.iter().map(|v| -> Box<dyn rusqlite::types::ToSql> {
+                    match v {
+                        Value::String(s) => Box::new(s.clone()),
+                        Value::Number(n) => {
+                            if let Some(i) = n.as_i64() { Box::new(i) }
+                            else if let Some(f) = n.as_f64() { Box::new(f) }
+                            else { Box::new(n.to_string()) }
+                        }
+                        Value::Bool(b) => Box::new(*b),
+                        Value::Null => Box::new(rusqlite::types::Null),
+                        _ => Box::new(v.to_string()),
+                    }
+                }).collect())
+                .unwrap_or_default();
+
+            let param_refs: Vec<&dyn rusqlite::types::ToSql> = param_values.iter().map(|p| p.as_ref()).collect();
+
+            // Check if it's a SELECT-like query
+            if query_upper.trim_start().starts_with("SELECT") || query_upper.trim_start().starts_with("PRAGMA") {
+                let rows: Vec<Value> = stmt.query_map(param_refs.as_slice(), |row| {
+                    let mut obj = serde_json::Map::new();
+                    for (i, name) in column_names.iter().enumerate() {
+                        let val: rusqlite::Result<Value> = row.get::<_, String>(i)
+                            .map(Value::String)
+                            .or_else(|_| row.get::<_, i64>(i).map(|n| json!(n)))
+                            .or_else(|_| row.get::<_, f64>(i).map(|n| json!(n)))
+                            .or_else(|_| row.get::<_, bool>(i).map(|b| json!(b)))
+                            .or_else(|_| Ok(Value::Null));
+                        obj.insert(name.clone(), val.unwrap_or(Value::Null));
+                    }
+                    Ok(Value::Object(obj))
+                }).map_err(|e| format!("Query failed: {e}"))?
+                .filter_map(|r| r.ok())
+                .collect();
+
+                let row_count = rows.len();
+                Ok(json!({
+                    "columns": column_names,
+                    "rows": rows,
+                    "row_count": row_count,
+                    "text": format!("Query returned {} rows", row_count),
+                }))
+            } else {
+                let affected = stmt.execute(param_refs.as_slice())
+                    .map_err(|e| format!("Execute failed: {e}"))?;
+                Ok(json!({
+                    "affected_rows": affected,
+                    "text": format!("Executed: {} rows affected", affected),
+                }))
+            }
+        }
+        "postgres" | "postgresql" => {
+            let (client, connection) = tokio_postgres::connect(&connection, tokio_postgres::NoTls)
+                .await
+                .map_err(|e| format!("PostgreSQL connect failed: {e}"))?;
+
+            tokio::spawn(async move {
+                if let Err(e) = connection.await {
+                    tracing::error!("PostgreSQL connection error: {e}");
+                }
+            });
+
+            let rows = client.query(&query, &[])
+                .await
+                .map_err(|e| format!("Query failed: {e}"))?;
+
+            let mut result_rows = Vec::new();
+            for row in &rows {
+                let mut obj = serde_json::Map::new();
+                for (i, col) in row.columns().iter().enumerate() {
+                    let val: Value = if let Ok(v) = row.try_get::<_, String>(i) {
+                        json!(v)
+                    } else if let Ok(v) = row.try_get::<_, i64>(i) {
+                        json!(v)
+                    } else if let Ok(v) = row.try_get::<_, f64>(i) {
+                        json!(v)
+                    } else if let Ok(v) = row.try_get::<_, bool>(i) {
+                        json!(v)
+                    } else {
+                        Value::Null
+                    };
+                    obj.insert(col.name().to_string(), val);
+                }
+                result_rows.push(Value::Object(obj));
+            }
+
+            let row_count = result_rows.len();
+            Ok(json!({
+                "rows": result_rows,
+                "row_count": row_count,
+                "text": format!("Query returned {} rows", row_count),
+            }))
+        }
+        _ => Err(format!("Unsupported database type: {db_type}. Use 'sqlite' or 'postgres'.")),
+    }
+}
+
+pub async fn tool_db_schema(
+    db_type: String,
+    connection: String,
+) -> Result<Value, String> {
+    match db_type.as_str() {
+        "sqlite" => {
+            let conn = rusqlite::Connection::open(&connection)
+                .map_err(|e| format!("SQLite open failed: {e}"))?;
+
+            let mut stmt = conn.prepare(
+                "SELECT name, type, sql FROM sqlite_master WHERE type IN ('table', 'view') ORDER BY name"
+            ).map_err(|e| e.to_string())?;
+
+            let tables: Vec<Value> = stmt.query_map([], |row| {
+                Ok(json!({
+                    "name": row.get::<_, String>(0)?,
+                    "type": row.get::<_, String>(1)?,
+                    "sql": row.get::<_, String>(2).unwrap_or_default(),
+                }))
+            }).map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+
+            Ok(json!({
+                "tables": tables,
+                "db_type": "sqlite",
+                "text": format!("SQLite schema: {} tables/views", tables.len()),
+            }))
+        }
+        "postgres" | "postgresql" => {
+            let (client, connection) = tokio_postgres::connect(&connection, tokio_postgres::NoTls)
+                .await
+                .map_err(|e| format!("PostgreSQL connect failed: {e}"))?;
+
+            tokio::spawn(async move {
+                if let Err(e) = connection.await {
+                    tracing::error!("PostgreSQL connection error: {e}");
+                }
+            });
+
+            let rows = client.query(
+                "SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name",
+                &[],
+            ).await.map_err(|e| e.to_string())?;
+
+            let tables: Vec<Value> = rows.iter().map(|row| {
+                json!({
+                    "name": row.get::<_, String>(0),
+                    "type": row.get::<_, String>(1),
+                })
+            }).collect();
+
+            Ok(json!({
+                "tables": tables,
+                "db_type": "postgres",
+                "text": format!("PostgreSQL schema: {} tables", tables.len()),
+            }))
+        }
+        _ => Err(format!("Unsupported database type: {db_type}")),
+    }
+}
+
+// ============================================================
+// Python Runtime — execute Python scripts
+// ============================================================
+
+pub async fn tool_python_execute(
+    script: String,
+    working_dir: Option<String>,
+    timeout_ms: Option<u64>,
+    capture_files: Option<Vec<String>>,
+) -> Result<Value, String> {
+    let timeout = std::time::Duration::from_millis(timeout_ms.unwrap_or(30_000));
+
+    // Write script to temp file
+    let temp_dir = std::env::temp_dir();
+    let script_name = format!("hb_python_{}.py", uuid::Uuid::new_v4().simple());
+    let script_path = temp_dir.join(&script_name);
+    tokio::fs::write(&script_path, &script).await
+        .map_err(|e| format!("Failed to write temp script: {e}"))?;
+
+    // Determine python command (python3 on Unix, python on Windows)
+    let python_cmd = if cfg!(windows) { "python" } else { "python3" };
+
+    let mut cmd = tokio::process::Command::new(python_cmd);
+    cmd.arg(&script_path);
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+    if let Some(ref wd) = working_dir {
+        cmd.current_dir(wd);
+    }
+
+    let child = cmd.spawn().map_err(|e| format!("Failed to spawn Python: {e}. Is Python installed?"))?;
+
+    let output = tokio::time::timeout(timeout, child.wait_with_output())
+        .await
+        .map_err(|_| "Python script timed out")?
+        .map_err(|e| format!("Python execution failed: {e}"))?;
+
+    // Cleanup temp script
+    let _ = tokio::fs::remove_file(&script_path).await;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let exit_code = output.status.code().unwrap_or(-1);
+
+    // Capture generated files as base64
+    let mut captured = Vec::new();
+    if let Some(files) = capture_files {
+        for file_path in files {
+            if let Ok(data) = tokio::fs::read(&file_path).await {
+                let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data);
+                captured.push(json!({
+                    "path": file_path,
+                    "size": data.len(),
+                    "base64": b64,
+                }));
+            }
+        }
+    }
+
+    let text = if exit_code == 0 {
+        if stdout.is_empty() { "(no output)".to_string() } else { stdout.clone() }
+    } else {
+        format!("Exit code {exit_code}\nstdout:\n{stdout}\nstderr:\n{stderr}")
+    };
+
+    Ok(json!({
+        "stdout": stdout,
+        "stderr": stderr,
+        "exit_code": exit_code,
+        "captured_files": captured,
+        "text": text,
+    }))
+}
+
+// ============================================================
+// Clipboard — read/write system clipboard
+// ============================================================
+
+pub async fn tool_clipboard_read() -> Result<Value, String> {
+    let mut clipboard = arboard::Clipboard::new()
+        .map_err(|e| format!("Clipboard access failed: {e}"))?;
+
+    if let Ok(text) = clipboard.get_text() {
+        return Ok(json!({
+            "type": "text",
+            "content": text,
+            "text": format!("Clipboard: {} chars", text.len()),
+        }));
+    }
+
+    Ok(json!({
+        "type": "empty",
+        "content": "",
+        "text": "Clipboard is empty",
+    }))
+}
+
+pub async fn tool_clipboard_write(
+    content: String,
+) -> Result<Value, String> {
+    let len = content.len();
+    let mut clipboard = arboard::Clipboard::new()
+        .map_err(|e| format!("Clipboard access failed: {e}"))?;
+
+    clipboard.set_text(&content)
+        .map_err(|e| format!("Clipboard write failed: {e}"))?;
+
+    Ok(json!({
+        "success": true,
+        "text": format!("Copied {} chars to clipboard", len),
+    }))
 }
 
 // ============================================================

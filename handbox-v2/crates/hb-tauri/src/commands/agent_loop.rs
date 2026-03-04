@@ -7,10 +7,10 @@
 //! - Permission system for dangerous commands
 //! - Sub-agent spawning
 
-use crate::commands::llm::{invoke_llm, invoke_llm_stream, ChatMessage, EmbeddingRequest, LLMRequest, create_embedding};
+use crate::commands::llm::{invoke_llm, invoke_llm_stream, ChatMessage, EmbeddingRequest, LLMRequest, create_embedding, ToolDefinition, ToolCall};
 use crate::commands::system_tools;
 use crate::commands::mcp::{self, McpState};
-use crate::commands::vector_store::{self, VectorEntry, VectorStoreState};
+use crate::commands::vector_store::{self, VectorCollection, VectorEntry, VectorStoreState};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::future::Future;
@@ -45,6 +45,12 @@ pub struct AgentLoopRequest {
     pub conversation_id: Option<String>,
     pub mode: Option<String>, // "auto" | "plan" | "execute"
     pub allowed_tools: Option<Vec<String>>,
+    /// Tools that must always be included regardless of dynamic filtering
+    #[serde(default)]
+    pub pinned_tools: Option<Vec<String>>,
+    /// Tools that must never be included
+    #[serde(default)]
+    pub excluded_tools: Option<Vec<String>>,
     #[serde(default)]
     pub project_id: Option<String>,
 }
@@ -81,6 +87,26 @@ pub struct AgentUsage {
     pub total_input_tokens: i32,
     pub total_output_tokens: i32,
     pub tool_calls: usize,
+}
+
+/// Structured execution plan for Plan → Execute pipeline
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionPlan {
+    pub id: String,
+    pub title: String,
+    pub steps: Vec<PlanStep>,
+    pub status: String, // "pending" | "approved" | "executing" | "completed" | "failed"
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanStep {
+    pub id: usize,
+    pub description: String,
+    pub tool: String,
+    pub args: Value,
+    pub depends_on: Vec<usize>,
+    pub status: String, // "pending" | "running" | "completed" | "failed" | "skipped"
+    pub result: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -674,50 +700,170 @@ Use these tools to create visual workflows on the canvas. IMPORTANT RULES:
   args: { "node_id": "n1", "config": {"file_path": "/path/to/file.pdf"} }
 - **workflow_select_node**: Select/highlight a node for user attention
   args: { "node_id": "n1" }
+- **workflow_execute**: Execute the current canvas workflow immediately
+  args: {} (no arguments needed — executes whatever is on the canvas)
 
 #### Tool Catalog Reference (use these exact tool_ref and port names):
-| tool_ref      | inputs (port_name:type)            | outputs (port_name:type)         | config_fields           |
-|---------------|------------------------------------|----------------------------------|------------------------|
-| file-read     | path:string                        | content:string, size:number      | file_path, encoding    |
-| pdf-read      | path:string                        | content:string, pages:number     | file_path, page_range  |
-| files-read    | (none)                             | contents:array                   | file_paths             |
-| folder-read   | (none)                             | files:array                      | folder_path, pattern   |
-| file-write    | path:string, content:string        | success:boolean                  | file_path              |
-| user-input    | (none)                             | text:string                      | prompt                 |
-| display-output| data:any                           | (none)                           | format                 |
-| llm-chat      | prompt:string, context:string      | response:string                  | model, temperature     |
-| llm-summarize | text:string                        | summary:string                   | max_length, model      |
-| embedding     | text:string                        | vector:array                     | model                  |
-| text-split    | text:string                        | chunks:array                     | chunk_size, overlap    |
-| text-merge    | texts:array                        | merged:string                    | separator              |
-| text-template | variables:json                     | result:string                    | template               |
-| regex-extract | text:string                        | matches:array                    | pattern                |
-| json-parse    | json_string:string                 | data:json                        | (none)                 |
-| json-path     | data:json                          | result:any                       | expression             |
-| csv-read      | path:string                        | rows:array                       | delimiter              |
-| data-filter   | items:array                        | filtered:array                   | condition              |
-| condition     | value:any                          | true:any, false:any              | expression             |
-| loop          | items:array                        | results:array                    | max_iterations         |
-| merge         | input_a:any, input_b:any           | merged:json                      | (none)                 |
-| vector-store  | chunks:array, vectors:array        | index_id:string                  | index_name             |
-| vector-search | query_vector:array                 | results:array                    | top_k, index_name      |
 
-Example — "PDF를 읽고 분석" workflow:
+**CRITICAL: For workflow canvas nodes, you may ONLY use tool_ref values listed in this table.**
+**DO NOT use agent-level tools (multi_agent, sub_agent, bash_execute, etc.) as workflow node tool_refs.**
+**To create parallel evaluations, create MULTIPLE llm-chat nodes with different system_prompts.**
+
+| tool_ref       | inputs (port_name:type)            | outputs (port_name:type)         | config_fields                        |
+|----------------|------------------------------------|----------------------------------|--------------------------------------|
+| file-read      | path:string                        | content:string, size:number      | file_path, encoding                  |
+| pdf-read       | path:string                        | content:string, pages:number     | file_path, page_range                |
+| files-read     | (none)                             | contents:array                   | file_paths                           |
+| folder-read    | (none)                             | files:array                      | folder_path, pattern                 |
+| file-write     | path:string, content:string        | success:boolean                  | file_path                            |
+| user-input     | (none)                             | text:string                      | prompt                               |
+| display-output | data:any                           | (none)                           | format                               |
+| llm-chat       | prompt:string, context:string      | response:string                  | model, temperature, system_prompt    |
+| llm-summarize  | text:string                        | summary:string                   | max_length, model                    |
+| embedding      | text:string                        | vector:array                     | model                                |
+| text-split     | text:string                        | chunks:array                     | chunk_size, overlap                  |
+| text-merge     | texts:array                        | merged:string                    | separator                            |
+| text-template  | variables:json                     | result:string                    | template                             |
+| regex-extract  | text:string                        | matches:array                    | pattern                              |
+| json-parse     | json_string:string                 | data:json                        | (none)                               |
+| json-path      | data:json                          | result:any                       | expression                           |
+| csv-read       | path:string                        | rows:array                       | delimiter, file_path                 |
+| data-filter    | items:array                        | filtered:array                   | condition                            |
+| condition      | value:any                          | true:any, false:any              | expression                           |
+| loop           | items:array                        | results:array                    | max_iterations                       |
+| merge          | input_a:any, input_b:any           | merged:json                      | (none)                               |
+| http-request   | (none)                             | response:string, status:number   | url, method, headers, body           |
+| vector-store   | chunks:array, vectors:array        | index_id:string                  | index_name                           |
+| vector-search  | query_vector:array                 | results:array                    | top_k, index_name                    |
+
+#### CRITICAL Workflow Creation Rules:
+1. **ALWAYS set config fields** — every node MUST have its required config set via workflow_set_config:
+   - file-read/pdf-read: MUST set `file_path` to the actual file path (absolute path on Windows, use backslashes)
+   - file-write: MUST set `file_path` for the output file path
+   - csv-read: MUST set `file_path` via config (path input comes from edge or config)
+   - llm-chat: MUST set `model` (default: "claude-sonnet-4-20250514"), `system_prompt` (describe the task), optionally `temperature`
+   - display-output: MUST set `format` ("text", "json", "markdown", or "html") AND connect `data` input port
+   - text-template: MUST set `template` with `{{variable}}` placeholders
+   - data-filter: MUST set `condition` (e.g., "field > 10")
+   - http-request: MUST set `url`, `method` (GET/POST/PUT/DELETE), optionally `headers` (JSON object), `body`
+2. **When user mentions a file**, resolve the absolute path and set it directly in config
+3. **When user attaches a file** (shown as [첨부 파일: path]), use that exact path in config
+4. **NEVER leave file_path empty** — if the user mentioned a file, put its path in config immediately
+5. **Position nodes in a readable flow**: start at x=100, increment by 300 per column. For parallel nodes, use DIFFERENT y positions (y=100, y=300, y=500, etc.)
+6. **Use clear Korean labels** for each node describing its purpose
+7. **After creating a workflow, use workflow_execute to run it immediately** unless user just wants to see the structure
+
+#### Port Connection Reference (exact output→input mapping):
+- file-read.content → llm-chat.context OR text-split.text OR display-output.data
+- pdf-read.content → llm-chat.context OR text-split.text OR display-output.data
+- llm-chat.response → file-write.content OR display-output.data OR text-split.text OR merge.input_a/input_b
+- text-split.chunks → embedding.text (via loop) OR vector-store.chunks
+- csv-read.rows → data-filter.items OR display-output.data
+- data-filter.filtered → display-output.data OR llm-chat.context (as JSON)
+- text-merge.merged → llm-chat.prompt OR file-write.content OR display-output.data
+- vector-search.results → llm-chat.context
+- http-request.response → llm-chat.context OR json-parse.json_string OR display-output.data
+- merge.merged → llm-chat.context OR display-output.data (use merge to combine N outputs into one)
+
+#### Example 1 — Simple "PDF 분석" workflow:
 ```json
-{
-  "nodes": [
-    {"id":"n1","tool_ref":"pdf-read","label":"PDF 읽기","config":{},"position":{"x":100,"y":200}},
-    {"id":"n2","tool_ref":"llm-chat","label":"분석","config":{"model":"claude-sonnet-4-20250514"},"position":{"x":400,"y":200}},
-    {"id":"n3","tool_ref":"file-write","label":"결과 저장","config":{},"position":{"x":700,"y":200}}
-  ],
-  "edges": [
-    {"source":"n1","source_port":"content","target":"n2","target_port":"context"},
-    {"source":"n2","source_port":"response","target":"n3","target_port":"content"}
-  ],
-  "clear_existing": true
-}
+{"action":"workflow_create","args":{"clear_existing":true,"nodes":[
+  {"id":"n1","tool_ref":"pdf-read","label":"PDF 읽기","config":{},"position":{"x":100,"y":200}},
+  {"id":"n2","tool_ref":"llm-chat","label":"분석","config":{"model":"claude-sonnet-4-20250514","system_prompt":"주어진 문서를 분석하고 핵심 내용을 요약하세요."},"position":{"x":400,"y":200}},
+  {"id":"n3","tool_ref":"display-output","label":"결과 표시","config":{"format":"markdown"},"position":{"x":700,"y":200}}
+],"edges":[
+  {"source":"n1","source_port":"content","target":"n2","target_port":"context"},
+  {"source":"n2","source_port":"response","target":"n3","target_port":"data"}
+]}}
 ```
-After creation, use workflow_set_config to set file_path on n1, then tell the user to check the nodes.
+Then IMMEDIATELY call workflow_set_config to set file_path on n1:
+```json
+{"action":"workflow_set_config","args":{"node_id":"n1","config":{"file_path":"C:\\Users\\...\\document.pdf"}}}
+```
+Then execute:
+```json
+{"action":"workflow_execute","args":{}}
+```
+
+#### Example 2 — N명 병렬 전문가 평가 + 다수결 (Fan-Out / Fan-In 패턴):
+사용자가 "N명의 전문가가 병렬 평가" 같은 복잡한 구조를 요청할 때, 여러 llm-chat 노드를 생성하고 merge로 합쳐야 합니다.
+```json
+{"action":"workflow_create","args":{"clear_existing":true,"nodes":[
+  {"id":"n1","tool_ref":"pdf-read","label":"제안서 읽기","config":{},"position":{"x":100,"y":400}},
+  {"id":"e1","tool_ref":"llm-chat","label":"기술 전문가","config":{"model":"claude-sonnet-4-20250514","system_prompt":"당신은 기술 전문가입니다. 제안서의 기술적 실현 가능성을 평가하고, 최종적으로 '승인' 또는 '거부'를 선택하세요. 평가 근거를 포함하세요."},"position":{"x":450,"y":100}},
+  {"id":"e2","tool_ref":"llm-chat","label":"재무 전문가","config":{"model":"claude-sonnet-4-20250514","system_prompt":"당신은 재무 전문가입니다. 제안서의 예산 타당성과 ROI를 평가하고, '승인' 또는 '거부'를 선택하세요."},"position":{"x":450,"y":300}},
+  {"id":"e3","tool_ref":"llm-chat","label":"시장 전문가","config":{"model":"claude-sonnet-4-20250514","system_prompt":"당신은 시장 분석 전문가입니다. 제안서의 시장성과 경쟁력을 평가하고, '승인' 또는 '거부'를 선택하세요."},"position":{"x":450,"y":500}},
+  {"id":"e4","tool_ref":"llm-chat","label":"법률 전문가","config":{"model":"claude-sonnet-4-20250514","system_prompt":"당신은 법률 전문가입니다. 제안서의 법적 리스크를 평가하고, '승인' 또는 '거부'를 선택하세요."},"position":{"x":450,"y":700}},
+  {"id":"m1","tool_ref":"text-merge","label":"평가 통합","config":{"separator":"\\n---\\n"},"position":{"x":800,"y":400}},
+  {"id":"judge","tool_ref":"llm-chat","label":"다수결 판정","config":{"model":"claude-sonnet-4-20250514","system_prompt":"4명의 전문가 평가를 분석하세요. 각 전문가의 승인/거부 결정을 집계하고, 다수결로 최종 판정을 내리세요. 형식:\\n## 전문가별 판정\\n- 전문가 1: 승인/거부 (근거)\\n...\\n## 최종 결과: 승인/거부 (N:M)"},"position":{"x":1100,"y":400}},
+  {"id":"out","tool_ref":"display-output","label":"최종 결과","config":{"format":"markdown"},"position":{"x":1400,"y":400}}
+],"edges":[
+  {"source":"n1","source_port":"content","target":"e1","target_port":"context"},
+  {"source":"n1","source_port":"content","target":"e2","target_port":"context"},
+  {"source":"n1","source_port":"content","target":"e3","target_port":"context"},
+  {"source":"n1","source_port":"content","target":"e4","target_port":"context"},
+  {"source":"e1","source_port":"response","target":"m1","target_port":"texts"},
+  {"source":"e2","source_port":"response","target":"m1","target_port":"texts"},
+  {"source":"e3","source_port":"response","target":"m1","target_port":"texts"},
+  {"source":"e4","source_port":"response","target":"m1","target_port":"texts"},
+  {"source":"m1","source_port":"merged","target":"judge","target_port":"context"},
+  {"source":"judge","source_port":"response","target":"out","target_port":"data"}
+]}}
+```
+**핵심 패턴**: 같은 입력(n1)을 여러 llm-chat 노드에 연결 (fan-out), text-merge로 합치기 (fan-in), 최종 판정 llm-chat.
+**10명이 필요하면** e1~e10까지 노드를 만들고, 모두 m1의 texts에 연결하면 됩니다.
+
+#### Example 3 — 외부 API 데이터 수집 + 분석 (KIPRIS, 공공데이터 등):
+```json
+{"action":"workflow_create","args":{"clear_existing":true,"nodes":[
+  {"id":"n1","tool_ref":"http-request","label":"KIPRIS API 호출","config":{"url":"http://plus.kipris.or.kr/openapi/rest/patUtiModInfoSearchSevice/freeSearchInfo","method":"GET","headers":{"Accept":"application/json"}},"position":{"x":100,"y":200}},
+  {"id":"n2","tool_ref":"json-parse","label":"응답 파싱","config":{},"position":{"x":400,"y":200}},
+  {"id":"n3","tool_ref":"llm-chat","label":"특허 분석","config":{"model":"claude-sonnet-4-20250514","system_prompt":"특허 검색 결과를 분석하고 핵심 기술 트렌드를 파악하세요. 한국어로 응답하세요."},"position":{"x":700,"y":200}},
+  {"id":"n4","tool_ref":"display-output","label":"분석 결과","config":{"format":"markdown"},"position":{"x":1000,"y":200}}
+],"edges":[
+  {"source":"n1","source_port":"response","target":"n2","target_port":"json_string"},
+  {"source":"n2","source_port":"data","target":"n3","target_port":"context"},
+  {"source":"n3","source_port":"response","target":"n4","target_port":"data"}
+]}}
+```
+
+#### Example 4 — CSV 데이터 처리 + LLM 분석:
+```json
+{"action":"workflow_create","args":{"clear_existing":true,"nodes":[
+  {"id":"n1","tool_ref":"csv-read","label":"CSV 로드","config":{"delimiter":","},"position":{"x":100,"y":200}},
+  {"id":"n2","tool_ref":"data-filter","label":"데이터 필터","config":{"condition":"value > 100"},"position":{"x":400,"y":200}},
+  {"id":"n3","tool_ref":"llm-chat","label":"분석","config":{"model":"claude-sonnet-4-20250514","system_prompt":"제공된 데이터를 분석하고 인사이트를 도출하세요."},"position":{"x":700,"y":200}},
+  {"id":"n4","tool_ref":"display-output","label":"결과","config":{"format":"markdown"},"position":{"x":1000,"y":200}}
+],"edges":[
+  {"source":"n1","source_port":"rows","target":"n2","target_port":"items"},
+  {"source":"n2","source_port":"filtered","target":"n3","target_port":"context"},
+  {"source":"n3","source_port":"response","target":"n4","target_port":"data"}
+]}}
+```
+
+#### Example 5 — RAG Pipeline (PDF → chunk → search → answer):
+```json
+{"action":"workflow_create","args":{"clear_existing":true,"nodes":[
+  {"id":"n1","tool_ref":"pdf-read","label":"PDF 로드","config":{},"position":{"x":100,"y":200}},
+  {"id":"n2","tool_ref":"text-split","label":"청크 분할","config":{"chunk_size":1000,"overlap":200},"position":{"x":400,"y":200}},
+  {"id":"n3","tool_ref":"llm-chat","label":"질문 응답","config":{"model":"claude-sonnet-4-20250514","system_prompt":"주어진 컨텍스트를 기반으로 질문에 답하세요.","temperature":0.3},"position":{"x":700,"y":200}},
+  {"id":"n4","tool_ref":"display-output","label":"답변 표시","config":{"format":"markdown"},"position":{"x":1000,"y":200}}
+],"edges":[
+  {"source":"n1","source_port":"content","target":"n2","target_port":"text"},
+  {"source":"n2","source_port":"chunks","target":"n3","target_port":"context"},
+  {"source":"n3","source_port":"response","target":"n4","target_port":"data"}
+]}}
+```
+
+#### Common Mistakes to Avoid:
+- DO NOT leave config empty for file-read/pdf-read nodes — always set file_path
+- DO NOT forget to connect display-output's `data` input — it needs input to show anything
+- DO NOT use `text` as input port for llm-chat — use `prompt` for the question, `context` for background
+- DO NOT create nodes without proper labels — use descriptive Korean labels
+- DO NOT forget `system_prompt` for llm-chat — it controls the LLM's behavior
+- DO NOT use agent tools (multi_agent, sub_agent, bash_execute) as workflow node tool_refs — they are agent-level tools, NOT canvas nodes
+- DO NOT invent tool_ref values — ONLY use values from the Tool Catalog table above
+- For parallel evaluation: create MULTIPLE llm-chat nodes with DIFFERENT y positions and system_prompts, connect them all from the same source, and merge with text-merge
 
 ### MCP Tools (Model Context Protocol — external tool servers)
 - **mcp_list_servers**: List all connected MCP servers and their tools
@@ -1095,6 +1241,22 @@ fn dispatch_tool<'a>(action: &'a AgentAction, app: &'a AppHandle, conv_id: &'a s
             }
             Err(last_err)
         }
+        "http_request" => {
+            let url = action.args["url"].as_str().unwrap_or("").to_string();
+            let method = action.args["method"].as_str().map(String::from);
+            let headers = action.args.get("headers").cloned();
+            let body = action.args["body"].as_str().map(String::from);
+            let params = action.args.get("params").cloned();
+            let timeout = action.args["timeout_ms"].as_u64();
+            let max = action.args["max_chars"].as_u64().map(|v| v as usize);
+            let result = system_tools::tool_http_request(url, method, headers, body, params, timeout, max).await?;
+            let status = result["status"].as_u64().unwrap_or(0);
+            let text = result["text"].as_str().unwrap_or("").to_string();
+            let method_used = result["method"].as_str().unwrap_or("GET");
+            let elapsed = result["elapsed_ms"].as_u64().unwrap_or(0);
+            Ok(format!("[HTTP {} → {} ({} ms)]\n{}", method_used, status, elapsed,
+                text.chars().take(10000).collect::<String>()))
+        }
         "git_status" => {
             let path = action.args["path"].as_str().map(String::from);
             let result = system_tools::tool_git_status(path).await?;
@@ -1240,12 +1402,16 @@ fn dispatch_tool<'a>(action: &'a AgentAction, app: &'a AppHandle, conv_id: &'a s
         "sub_agent" => {
             // Sub-agent: runs a mini agent loop for a specific research task
             let sub_task = action.args["task"].as_str().unwrap_or("").to_string();
-            let sub_result = run_sub_agent(&sub_task, app, conv_id).await?;
+            let max_iter = action.args["max_iterations"].as_u64().map(|v| (v as usize).min(20)).unwrap_or(10);
+            let allow_write = action.args["allow_write"].as_bool().unwrap_or(false);
+            let model_override = action.args["model_id"].as_str().map(String::from);
+            let sub_result = run_sub_agent(&sub_task, app, conv_id, max_iter, allow_write, model_override.as_deref()).await?;
             Ok(sub_result)
         }
         "multi_agent" => {
-            // Multi-agent: dispatch N parallel agents with different personas
+            // Multi-agent: dispatch N parallel agents with different personas + consensus
             let task = action.args["task"].as_str().unwrap_or("").to_string();
+            let consensus = action.args["consensus"].as_str().unwrap_or("none").to_string();
             let agents_raw = action.args["agents"].as_array()
                 .ok_or("multi_agent requires 'agents' array")?;
 
@@ -1276,6 +1442,8 @@ fn dispatch_tool<'a>(action: &'a AgentAction, app: &'a AppHandle, conv_id: &'a s
                     conversation_id: Some(format!("multi-{}-{}", spec.id, uuid::Uuid::new_v4())),
                     mode: None,
                     allowed_tools: spec.allowed_tools.clone(),
+                    pinned_tools: None,
+                    excluded_tools: None,
                     project_id: None,
                 };
 
@@ -1290,25 +1458,232 @@ fn dispatch_tool<'a>(action: &'a AgentAction, app: &'a AppHandle, conv_id: &'a s
                 }));
             }
 
-            let mut output = Vec::new();
+            // Collect results
+            let mut agent_results: Vec<(String, String, String)> = Vec::new(); // (name, role, answer)
+            let mut failures = Vec::new();
             for handle in handles {
                 match handle.await {
                     Ok((name, role, Ok(result))) => {
-                        output.push(format!("## {} ({})\n{}", name, role, result.final_answer));
+                        agent_results.push((name, role, result.final_answer));
                     }
                     Ok((name, role, Err(e))) => {
-                        output.push(format!("## {} ({}) — FAILED\n{}", name, role, e));
+                        failures.push(format!("{} ({}): FAILED — {}", name, role, e));
                     }
                     Err(e) => {
-                        output.push(format!("## Agent panicked: {}", e));
+                        failures.push(format!("Agent panicked: {}", e));
                     }
                 }
             }
 
-            Ok(format!("Multi-agent results ({} agents):\n\n{}", agents.len(), output.join("\n\n---\n\n")))
+            // Apply consensus mode
+            let final_output = match consensus.as_str() {
+                "majority_vote" => {
+                    // Count occurrences of each unique answer (case-insensitive first 200 chars)
+                    let mut votes: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+                    for (name, _role, answer) in &agent_results {
+                        let key = answer.chars().take(200).collect::<String>().to_lowercase();
+                        votes.entry(key).or_default().push(name.clone());
+                    }
+                    let winner = votes.iter().max_by_key(|(_k, v)| v.len());
+                    if let Some((key, voters)) = winner {
+                        // Find full answer for the key
+                        let full_answer = agent_results.iter()
+                            .find(|(_n, _r, a)| a.chars().take(200).collect::<String>().to_lowercase() == *key)
+                            .map(|(_n, _r, a)| a.clone())
+                            .unwrap_or_default();
+                        format!("**Consensus (majority vote): {}/{} agents agreed**\nVoters: {}\n\n{}\n\n{}",
+                            voters.len(), agent_results.len(), voters.join(", "), full_answer,
+                            if !failures.is_empty() { format!("\nFailures:\n{}", failures.join("\n")) } else { String::new() })
+                    } else {
+                        "No consensus reached — all agents failed.".to_string()
+                    }
+                }
+                "synthesis" => {
+                    // Use LLM to synthesize all responses into one coherent answer
+                    let responses_text: Vec<String> = agent_results.iter()
+                        .map(|(name, role, answer)| format!("## {} ({})\n{}", name, role, answer))
+                        .collect();
+                    let synthesis_prompt = format!(
+                        "Multiple agents were asked: \"{}\"\n\nHere are their responses:\n\n{}\n\nSynthesize these into a single, comprehensive answer that combines the best insights from all agents. Be concise but thorough.",
+                        task, responses_text.join("\n\n---\n\n")
+                    );
+
+                    // Resolve provider for synthesis call
+                    let resolved_provider = if let Some(app_state) = app.try_state::<crate::state::AppState>() {
+                        if let Ok(creds) = app_state.llm_credentials.try_read() {
+                            creds.active_provider.clone()
+                        } else { None }
+                    } else { None };
+
+                    match invoke_llm(LLMRequest {
+                        prompt: synthesis_prompt,
+                        system_prompt: Some("You are a synthesizer agent. Combine multiple agent responses into one coherent answer.".to_string()),
+                        messages: None,
+                        model_id: None,
+                        max_tokens: Some(4096),
+                        temperature: Some(0.3),
+                        provider: resolved_provider,
+                        tools: None,
+                        tool_choice: None,
+                    }).await {
+                        Ok(resp) => format!("**Synthesized from {} agents:**\n\n{}\n\n{}",
+                            agent_results.len(), resp.text,
+                            if !failures.is_empty() { format!("\nFailures:\n{}", failures.join("\n")) } else { String::new() }),
+                        Err(e) => {
+                            // Fallback to concatenation if synthesis fails
+                            let concat: Vec<String> = agent_results.iter()
+                                .map(|(n, r, a)| format!("## {} ({})\n{}", n, r, a))
+                                .collect();
+                            format!("Synthesis failed ({}), raw results:\n\n{}", e, concat.join("\n\n---\n\n"))
+                        }
+                    }
+                }
+                _ => {
+                    // Default: concatenation (original behavior)
+                    let mut output: Vec<String> = agent_results.iter()
+                        .map(|(name, role, answer)| format!("## {} ({})\n{}", name, role, answer))
+                        .collect();
+                    output.extend(failures.iter().map(|f| format!("## FAILED: {}", f)));
+                    format!("Multi-agent results ({} agents):\n\n{}", agents.len(), output.join("\n\n---\n\n"))
+                }
+            };
+
+            Ok(final_output)
+        }
+        "create_plan" => {
+            use tauri::Emitter;
+            let title = action.args["title"].as_str().unwrap_or("Untitled Plan").to_string();
+            let steps_raw = action.args["steps"].as_array()
+                .ok_or("create_plan requires 'steps' array")?;
+
+            let plan_id = uuid::Uuid::new_v4().to_string();
+            let steps: Vec<PlanStep> = steps_raw.iter().enumerate().map(|(i, s)| {
+                PlanStep {
+                    id: i,
+                    description: s["description"].as_str().unwrap_or("").to_string(),
+                    tool: s["tool"].as_str().unwrap_or("").to_string(),
+                    args: s["args"].clone(),
+                    depends_on: s["depends_on"].as_array()
+                        .map(|arr| arr.iter().filter_map(|v| v.as_u64().map(|n| n as usize)).collect())
+                        .unwrap_or_default(),
+                    status: "pending".to_string(),
+                    result: None,
+                }
+            }).collect();
+
+            let plan = ExecutionPlan {
+                id: plan_id.clone(),
+                title: title.clone(),
+                steps: steps.clone(),
+                status: "pending".to_string(),
+            };
+
+            // Store plan in conversation state for later execution
+            if let Some(app_state) = app.try_state::<crate::state::AppState>() {
+                if let Ok(mut plans) = app_state.execution_plans.try_write() {
+                    plans.insert(plan_id.clone(), plan.clone());
+                }
+            }
+
+            // Emit plan to frontend for display
+            let _ = app.emit("agent-plan", json!({
+                "plan_id": &plan_id,
+                "title": &title,
+                "steps": steps,
+                "status": "pending",
+            }));
+
+            Ok(format!("Created execution plan '{}' with {} steps (ID: {}). Use execute_plan to run it.", title, steps_raw.len(), plan_id))
+        }
+        "execute_plan" => {
+            use tauri::Emitter;
+            let plan_id = action.args["plan_id"].as_str().unwrap_or("").to_string();
+
+            // Retrieve the plan
+            let plan = if let Some(app_state) = app.try_state::<crate::state::AppState>() {
+                if let Ok(plans) = app_state.execution_plans.try_read() {
+                    plans.get(&plan_id).cloned()
+                } else { None }
+            } else { None };
+
+            let mut plan = plan.ok_or_else(|| format!("Plan '{}' not found", plan_id))?;
+            plan.status = "executing".to_string();
+
+            let mut results = Vec::new();
+            let total_steps = plan.steps.len();
+
+            for step_idx in 0..total_steps {
+                // Extract needed data before mutable borrow
+                let step_tool = plan.steps[step_idx].tool.clone();
+                let step_args = plan.steps[step_idx].args.clone();
+                let step_desc = plan.steps[step_idx].description.clone();
+                let step_deps = plan.steps[step_idx].depends_on.clone();
+
+                // Check dependencies are completed
+                let deps_met = step_deps.iter().all(|dep| {
+                    plan.steps.get(*dep).map(|s| s.status == "completed").unwrap_or(false)
+                });
+                if !deps_met {
+                    plan.steps[step_idx].status = "skipped".to_string();
+                    plan.steps[step_idx].result = Some("Skipped: dependencies not met".to_string());
+                    results.push(format!("Step {}: SKIPPED (deps not met)", step_idx));
+                    continue;
+                }
+
+                // Update step status
+                plan.steps[step_idx].status = "running".to_string();
+                let _ = app.emit("agent-plan-step", json!({
+                    "plan_id": &plan_id,
+                    "step_id": step_idx,
+                    "status": "running",
+                }));
+
+                // Execute the step
+                let step_action = AgentAction {
+                    tool: step_tool,
+                    args: step_args,
+                };
+                let step_result = match dispatch_tool(&step_action, app, conv_id, None).await {
+                    Ok(r) => {
+                        plan.steps[step_idx].status = "completed".to_string();
+                        plan.steps[step_idx].result = Some(r.chars().take(2000).collect());
+                        results.push(format!("Step {} ({}): OK", step_idx, step_desc));
+                        r
+                    }
+                    Err(e) => {
+                        plan.steps[step_idx].status = "failed".to_string();
+                        plan.steps[step_idx].result = Some(e.clone());
+                        results.push(format!("Step {} ({}): FAILED — {}", step_idx, step_desc, e));
+                        e
+                    }
+                };
+
+                let step_status = plan.steps[step_idx].status.clone();
+                let _ = app.emit("agent-plan-step", json!({
+                    "plan_id": &plan_id,
+                    "step_id": step_idx,
+                    "status": step_status,
+                    "result": step_result.chars().take(500).collect::<String>(),
+                }));
+            }
+
+            let completed = plan.steps.iter().filter(|s| s.status == "completed").count();
+            let failed = plan.steps.iter().filter(|s| s.status == "failed").count();
+            plan.status = if failed > 0 { "completed_with_errors".to_string() } else { "completed".to_string() };
+
+            // Update stored plan
+            if let Some(app_state) = app.try_state::<crate::state::AppState>() {
+                if let Ok(mut plans) = app_state.execution_plans.try_write() {
+                    plans.insert(plan_id.clone(), plan);
+                }
+            }
+
+            Ok(format!("Plan execution complete: {}/{} steps succeeded, {} failed.\n\n{}", completed, total_steps, failed, results.join("\n")))
         }
         "finish" => {
-            Ok(action.args["answer"].as_str().unwrap_or("Done").to_string())
+            Ok(action.args["answer"].as_str()
+                .or_else(|| action.args["result"].as_str())
+                .unwrap_or("Done").to_string())
         }
         // ── Workflow Canvas Tools ──
         "workflow_create" => {
@@ -1407,9 +1782,172 @@ fn dispatch_tool<'a>(action: &'a AgentAction, app: &'a AppHandle, conv_id: &'a s
 
             Ok(format!("Node '{node_id}' selected on canvas"))
         }
+        "workflow_update_node" => {
+            let node_id = action.args["node_id"].as_str().unwrap_or("").to_string();
+            if node_id.is_empty() {
+                return Err("workflow_update_node requires 'node_id'".to_string());
+            }
+            let label = action.args.get("label")
+                .and_then(|v| v.as_str())
+                .map(|s| s.chars().take(100).collect::<String>());
+            let position = action.args.get("position").cloned();
+
+            app.emit("workflow-update", json!({
+                "type": "update_node",
+                "node_id": node_id,
+                "label": label,
+                "position": position,
+            })).map_err(|e| format!("Failed to emit workflow update: {e}"))?;
+
+            let mut changes = Vec::new();
+            if label.is_some() { changes.push("label"); }
+            if position.is_some() { changes.push("position"); }
+            Ok(format!("Updated node '{}': changed {}", node_id, changes.join(", ")))
+        }
+        "workflow_remove_edge" => {
+            let edge_id = action.args.get("edge_id")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let source = action.args.get("source")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let target = action.args.get("target")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+
+            if edge_id.is_none() && (source.is_none() || target.is_none()) {
+                return Err("workflow_remove_edge requires 'edge_id' or both 'source' and 'target'".to_string());
+            }
+
+            app.emit("workflow-update", json!({
+                "type": "remove_edge",
+                "edge_id": edge_id,
+                "source": source,
+                "target": target,
+            })).map_err(|e| format!("Failed to emit workflow update: {e}"))?;
+
+            if let Some(eid) = edge_id {
+                Ok(format!("Removed edge '{eid}'"))
+            } else {
+                Ok(format!("Removed edge between '{}' and '{}'",
+                    source.unwrap_or_default(), target.unwrap_or_default()))
+            }
+        }
+        "workflow_list" => {
+            // Emit list_request and wait for response via a oneshot channel
+            use tokio::sync::oneshot;
+            use std::sync::Mutex;
+
+            let (tx, rx) = oneshot::channel::<String>();
+            let tx = Arc::new(Mutex::new(Some(tx)));
+            let tx_clone = tx.clone();
+
+            // Listen for the response event from frontend
+            let _handler = app.listen("workflow-list-response", move |event| {
+                if let Some(sender) = tx_clone.lock().unwrap().take() {
+                    let payload = event.payload().to_string();
+                    let _ = sender.send(payload);
+                }
+            });
+
+            // Ask frontend for current canvas state
+            app.emit("workflow-update", json!({
+                "type": "list_request",
+            })).map_err(|e| format!("Failed to emit workflow list request: {e}"))?;
+
+            // Wait with 3-second timeout
+            match tokio::time::timeout(std::time::Duration::from_secs(3), rx).await {
+                Ok(Ok(payload)) => {
+                    Ok(format!("Current canvas state:\n{}", payload))
+                }
+                Ok(Err(_)) => {
+                    Ok("Canvas state: no response (channel closed)".to_string())
+                }
+                Err(_) => {
+                    Ok("Canvas state: timeout waiting for frontend response".to_string())
+                }
+            }
+        }
         // ── Vector Store Tools (RAG) ──
+        "api_ingest" => {
+            // Composite: http_request → chunk → embed → vector_store with source metadata
+            let url = action.args["url"].as_str().unwrap_or("").to_string();
+            let collection = scope_collection_name(
+                action.args.get("collection").and_then(|v| v.as_str()).unwrap_or("default"),
+                project_id,
+            );
+            let source_label = action.args.get("source_label")
+                .and_then(|v| v.as_str())
+                .unwrap_or(&url).to_string();
+            let chunk_size = action.args.get("chunk_size")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(1000) as usize;
+            let method = action.args.get("method")
+                .and_then(|v| v.as_str())
+                .unwrap_or("GET").to_string();
+            let req_headers = action.args.get("headers").cloned();
+            let req_body = action.args.get("body")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+
+            // Step 1: Fetch data from API
+            let http_result = crate::commands::system_tools::tool_http_request(
+                url.clone(),
+                Some(method.clone()),
+                req_headers,
+                req_body,
+                None,
+                Some(30000),
+                Some(500000),
+            ).await?;
+
+            let status = http_result["status"].as_u64().unwrap_or(0);
+            let text = http_result["text"].as_str().unwrap_or("").to_string();
+            if text.is_empty() {
+                return Err(format!("api_ingest: empty response from {url} (HTTP {status})"));
+            }
+
+            // Step 2: Chunk text
+            let chunks = chunk_text(&text, chunk_size);
+            let total_chunks = chunks.len();
+            let ingested_at = chrono::Utc::now().to_rfc3339();
+
+            // Step 3: Embed and store each chunk
+            let vs_state: tauri::State<'_, Arc<VectorStoreState>> = app.state();
+            let mut entries = Vec::new();
+            for (i, chunk) in chunks.iter().enumerate() {
+                let vector = match create_embedding(EmbeddingRequest { text: chunk.clone(), model_id: None }).await {
+                    Ok(resp) => resp.embedding,
+                    Err(_) => simple_text_embedding(chunk, 128),
+                };
+                let metadata = json!({
+                    "source": url,
+                    "source_type": "api",
+                    "source_label": source_label,
+                    "chunk_id": i,
+                    "total_chunks": total_chunks,
+                    "ingested_at": ingested_at,
+                    "http_status": status,
+                    "http_method": method,
+                });
+                entries.push(VectorEntry {
+                    id: format!("api_{}_{}", uuid::Uuid::new_v4(), i),
+                    vector,
+                    metadata,
+                    text: Some(chunk.clone()),
+                });
+            }
+
+            let result = vector_store::vector_store_raw(&collection, entries, &*vs_state).await?;
+            let stored = result["stored_count"].as_u64().unwrap_or(0);
+            Ok(format!("Ingested {} chunks from {} (HTTP {}) into collection '{}'. Source: {}",
+                stored, url, status, collection, source_label))
+        }
         "vector_store" => {
-            let collection = action.args["collection"].as_str().unwrap_or("default").to_string();
+            let collection = scope_collection_name(
+                action.args["collection"].as_str().unwrap_or("default"),
+                project_id,
+            );
             let raw_entries = action.args["entries"].as_array()
                 .ok_or("vector_store requires 'entries' array")?;
 
@@ -1445,7 +1983,10 @@ fn dispatch_tool<'a>(action: &'a AgentAction, app: &'a AppHandle, conv_id: &'a s
             Ok(result["text"].as_str().unwrap_or("Stored").to_string())
         }
         "vector_search" => {
-            let collection = action.args["collection"].as_str().unwrap_or("default").to_string();
+            let collection = scope_collection_name(
+                action.args["collection"].as_str().unwrap_or("default"),
+                project_id,
+            );
             let top_k = action.args["top_k"].as_u64().unwrap_or(5) as usize;
             let query_text = action.args["query"].as_str().unwrap_or("").to_string();
 
@@ -1457,10 +1998,46 @@ fn dispatch_tool<'a>(action: &'a AgentAction, app: &'a AppHandle, conv_id: &'a s
 
             let vs_state: tauri::State<'_, Arc<VectorStoreState>> = app.state();
             let result = vector_store::vector_search_raw(&collection, &query_vector, top_k, 0.0, &*vs_state).await?;
-            Ok(result["text"].as_str().unwrap_or("No results").to_string())
+
+            // Enhanced output with source citations
+            if let Some(results) = result["results"].as_array() {
+                let mut lines = vec![format!("Top {} results from '{collection}':", results.len())];
+                for (i, r) in results.iter().enumerate() {
+                    let score = r["score"].as_f64().unwrap_or(0.0);
+                    let id = r["id"].as_str().unwrap_or("?");
+                    let text_preview = r["text"].as_str().unwrap_or("")
+                        .chars().take(300).collect::<String>();
+                    let meta = &r["metadata"];
+
+                    // Format source citation if available
+                    let source_line = if let Some(src) = meta["source"].as_str() {
+                        let label = meta["source_label"].as_str().unwrap_or(src);
+                        let chunk_id = meta["chunk_id"].as_u64();
+                        if let Some(cid) = chunk_id {
+                            format!("   Source: {} (chunk {})", label, cid)
+                        } else {
+                            format!("   Source: {}", label)
+                        }
+                    } else {
+                        String::new()
+                    };
+
+                    lines.push(format!("{}. [score={:.3}] {}", i + 1, score, id));
+                    if !source_line.is_empty() {
+                        lines.push(source_line);
+                    }
+                    lines.push(format!("   {}", text_preview));
+                }
+                Ok(lines.join("\n"))
+            } else {
+                Ok(result["text"].as_str().unwrap_or("No results").to_string())
+            }
         }
         "vector_delete" => {
-            let collection = action.args["collection"].as_str().unwrap_or("default").to_string();
+            let collection = scope_collection_name(
+                action.args["collection"].as_str().unwrap_or("default"),
+                project_id,
+            );
             let ids: Vec<String> = action.args["ids"].as_array()
                 .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
                 .unwrap_or_default();
@@ -1478,9 +2055,24 @@ fn dispatch_tool<'a>(action: &'a AgentAction, app: &'a AppHandle, conv_id: &'a s
         "vector_list_collections" => {
             let vs_state: tauri::State<'_, Arc<VectorStoreState>> = app.state();
             let colls = vs_state.collections.read().await;
-            let info: Vec<String> = colls.values().map(|c| {
-                format!("- {}: {} vectors (dim={})", c.name, c.entries.len(), c.dimension)
-            }).collect();
+            // Filter by project scope if project_id is set
+            let prefix = project_id.map(|pid| format!("{pid}__"));
+            let info: Vec<String> = colls.values()
+                .filter(|c| {
+                    match &prefix {
+                        Some(p) => c.name.starts_with(p),
+                        None => true,
+                    }
+                })
+                .map(|c| {
+                    // Show short name (without project prefix) for scoped collections
+                    let display_name = match &prefix {
+                        Some(p) if c.name.starts_with(p) => &c.name[p.len()..],
+                        _ => &c.name,
+                    };
+                    format!("- {} (full: {}): {} vectors (dim={})", display_name, c.name, c.entries.len(), c.dimension)
+                })
+                .collect();
             Ok(if info.is_empty() {
                 "No vector collections".to_string()
             } else {
@@ -1661,14 +2253,13 @@ fn dispatch_tool<'a>(action: &'a AgentAction, app: &'a AppHandle, conv_id: &'a s
 
         // ── DAG Workflow Execution ──
         "workflow_execute" => {
-            let workflow_id = action.args["workflow_id"].as_str().unwrap_or("").to_string();
-            let wf_state: tauri::State<'_, crate::state::AppState> = app.state();
-            let tracker: tauri::State<'_, Arc<crate::commands::execution::ExecutionTrackerState>> = app.state();
-            let convs: tauri::State<'_, Arc<AgentConversationState>> = app.state();
-            let result = crate::commands::execution::execute_workflow(
-                workflow_id, wf_state, tracker, convs, app.clone()
-            ).await?;
-            Ok(serde_json::to_string_pretty(&result).unwrap_or_default())
+            // Emit event to frontend to trigger canvas execution
+            // The frontend useExecution hook handles: canvas→JSON→import→execute
+            app.emit("workflow-execute-request", serde_json::json!({
+                "source": "agent",
+                "conversation_id": conv_id,
+            })).map_err(|e| format!("Failed to emit execute event: {e}"))?;
+            Ok("Workflow execution started. The canvas workflow is now running. Results will appear on each node as inline previews.".to_string())
         }
         "workflow_list" => {
             let wf_state: tauri::State<'_, crate::state::AppState> = app.state();
@@ -1682,9 +2273,338 @@ fn dispatch_tool<'a>(action: &'a AgentAction, app: &'a AppHandle, conv_id: &'a s
             Ok(format!("Execution status: {status}"))
         }
 
+        // ── New Tools: web crawl, download, archive, DB, Python, clipboard ──
+        "web_crawl" => {
+            let url = action.args["url"].as_str().unwrap_or("").to_string();
+            let max_depth = action.args["max_depth"].as_u64().map(|v| v as usize);
+            let max_pages = action.args["max_pages"].as_u64().map(|v| v as usize);
+            let selector = action.args["selector"].as_str().map(String::from);
+            let follow_pattern = action.args["follow_pattern"].as_str().map(String::from);
+            let result = system_tools::tool_web_crawl(url, max_depth, max_pages, selector, follow_pattern, Some(true)).await?;
+            Ok(result["text"].as_str().unwrap_or("").to_string()
+                + "\n\n"
+                + &serde_json::to_string_pretty(&result["pages"]).unwrap_or_default())
+        }
+        "file_download" => {
+            let url = action.args["url"].as_str().unwrap_or("").to_string();
+            let output = action.args["output_path"].as_str().map(String::from);
+            let result = system_tools::tool_file_download(url, output, Some(true)).await?;
+            Ok(result["text"].as_str().unwrap_or("").to_string())
+        }
+        "archive_compress" => {
+            let source = action.args["source_path"].as_str().unwrap_or("").to_string();
+            let output = action.args["output_path"].as_str().unwrap_or("archive.zip").to_string();
+            let format = action.args["format"].as_str().map(String::from);
+            let result = system_tools::tool_archive_compress(source, output, format).await?;
+            Ok(result["text"].as_str().unwrap_or("").to_string())
+        }
+        "archive_decompress" => {
+            let path = action.args["archive_path"].as_str().unwrap_or("").to_string();
+            let output_dir = action.args["output_dir"].as_str().map(String::from);
+            let result = system_tools::tool_archive_decompress(path, output_dir).await?;
+            Ok(result["text"].as_str().unwrap_or("").to_string())
+        }
+        "archive_list" => {
+            let path = action.args["archive_path"].as_str().unwrap_or("").to_string();
+            let result = system_tools::tool_archive_list(path).await?;
+            Ok(serde_json::to_string_pretty(&result).unwrap_or_default())
+        }
+        "db_query" => {
+            let db_type = action.args["db_type"].as_str().unwrap_or("sqlite").to_string();
+            let connection = action.args["connection"].as_str().unwrap_or("").to_string();
+            let query = action.args["query"].as_str().unwrap_or("").to_string();
+            let params = action.args["params"].as_array().map(|a| a.to_vec());
+            let result = system_tools::tool_db_query(db_type, connection, query, params).await?;
+            Ok(result["text"].as_str().unwrap_or("").to_string()
+                + "\n"
+                + &serde_json::to_string_pretty(&result["rows"]).unwrap_or_default())
+        }
+        "db_schema" => {
+            let db_type = action.args["db_type"].as_str().unwrap_or("sqlite").to_string();
+            let connection = action.args["connection"].as_str().unwrap_or("").to_string();
+            let result = system_tools::tool_db_schema(db_type, connection).await?;
+            Ok(serde_json::to_string_pretty(&result).unwrap_or_default())
+        }
+        "python_execute" | "python" => {
+            let script = action.args["script"].as_str().unwrap_or("").to_string();
+            let wd = action.args["working_dir"].as_str().map(String::from);
+            let timeout = action.args["timeout_ms"].as_u64();
+            let capture = action.args["capture_files"].as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect());
+            let result = system_tools::tool_python_execute(script, wd, timeout, capture).await?;
+            Ok(result["text"].as_str().unwrap_or("").to_string())
+        }
+        "clipboard_read" => {
+            let result = system_tools::tool_clipboard_read().await?;
+            Ok(result["text"].as_str().unwrap_or("").to_string()
+                + "\n"
+                + result["content"].as_str().unwrap_or(""))
+        }
+        "clipboard_write" => {
+            let content = action.args["content"].as_str().unwrap_or("").to_string();
+            let result = system_tools::tool_clipboard_write(content).await?;
+            Ok(result["text"].as_str().unwrap_or("").to_string())
+        }
+
         other => Err(format!("Unknown tool: {other}"))
     }
     }) // close Box::pin(async move { ... })
+}
+
+// ============================================================
+// Function Calling: Tool Definitions & Dynamic Filtering
+// ============================================================
+
+/// Build native tool definitions for function calling APIs.
+/// Returns ToolDefinition structs that map to the dispatch_tool match arms.
+fn build_tool_definitions(categories: &[String], allowed: Option<&[String]>, excluded: Option<&[String]>) -> Vec<ToolDefinition> {
+    let mut defs = Vec::new();
+    macro_rules! tool {
+        ($cat:expr, $name:expr, $desc:expr, $schema:expr) => {
+            if categories.contains(&$cat.to_string()) || categories.contains(&"all".to_string()) {
+                defs.push(ToolDefinition {
+                    name: $name.to_string(),
+                    description: $desc.to_string(),
+                    input_schema: $schema,
+                });
+            }
+        };
+    }
+
+    // Core tools (always included)
+    tool!("core", "bash_execute", "Execute a shell command and return stdout/stderr",
+        json!({"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"},"working_dir":{"type":"string","description":"Working directory"}},"required":["command"]}));
+    tool!("core", "file_read", "Read file contents with line numbers",
+        json!({"type":"object","properties":{"path":{"type":"string","description":"File path"},"offset":{"type":"integer","description":"Line offset"},"limit":{"type":"integer","description":"Max lines"}},"required":["path"]}));
+    tool!("core", "file_write", "Create or overwrite a file",
+        json!({"type":"object","properties":{"path":{"type":"string","description":"File path"},"content":{"type":"string","description":"File content"}},"required":["path","content"]}));
+    tool!("core", "file_edit", "Find and replace text in a file",
+        json!({"type":"object","properties":{"path":{"type":"string","description":"File path"},"old_text":{"type":"string","description":"Text to find"},"new_text":{"type":"string","description":"Replacement text"}},"required":["path","old_text","new_text"]}));
+    tool!("core", "finish", "End the task with a final answer",
+        json!({"type":"object","properties":{"answer":{"type":"string","description":"Final answer"}},"required":["answer"]}));
+
+    // Code search tools
+    tool!("code", "grep_search", "Search file contents with regex",
+        json!({"type":"object","properties":{"pattern":{"type":"string","description":"Regex pattern"},"path":{"type":"string","description":"Directory to search"},"include":{"type":"string","description":"File glob filter"}},"required":["pattern"]}));
+    tool!("code", "glob_search", "Find files by glob pattern",
+        json!({"type":"object","properties":{"pattern":{"type":"string","description":"Glob pattern (e.g. **/*.rs)"},"path":{"type":"string","description":"Base directory"}},"required":["pattern"]}));
+    tool!("code", "project_tree", "Show directory structure",
+        json!({"type":"object","properties":{"path":{"type":"string","description":"Root directory"},"max_depth":{"type":"integer"},"max_entries":{"type":"integer"}},"required":[]}));
+
+    // Web tools
+    tool!("web", "web_search", "Search the web",
+        json!({"type":"object","properties":{"query":{"type":"string","description":"Search query"},"max_results":{"type":"integer"}},"required":["query"]}));
+    tool!("web", "web_fetch", "Fetch URL content as text",
+        json!({"type":"object","properties":{"url":{"type":"string","description":"URL to fetch"},"selector":{"type":"string","description":"CSS selector"}},"required":["url"]}));
+    tool!("web", "http_request", "Full HTTP client (GET/POST/PUT/DELETE/PATCH) with custom headers, body, and query parameters",
+        json!({"type":"object","properties":{
+            "url":{"type":"string","description":"Target URL"},
+            "method":{"type":"string","enum":["GET","POST","PUT","DELETE","PATCH"],"description":"HTTP method (default: GET)"},
+            "headers":{"type":"object","description":"Request headers as JSON object"},
+            "body":{"type":"string","description":"Request body (JSON or text)"},
+            "params":{"type":"object","description":"Query parameters as JSON object"},
+            "timeout_ms":{"type":"integer","description":"Timeout in ms (default: 30000)"},
+            "max_chars":{"type":"integer","description":"Max response chars (default: 100000)"}
+        },"required":["url"]}));
+    tool!("web", "web_crawl", "Recursively crawl a website",
+        json!({"type":"object","properties":{"url":{"type":"string","description":"Starting URL"},"max_depth":{"type":"integer","description":"Max crawl depth (default 2)"},"max_pages":{"type":"integer","description":"Max pages (default 10)"},"selector":{"type":"string","description":"CSS selector for content"},"follow_pattern":{"type":"string","description":"Regex filter for URLs to follow"}},"required":["url"]}));
+    tool!("web", "file_download", "Download a URL to a local file",
+        json!({"type":"object","properties":{"url":{"type":"string","description":"URL to download"},"output_path":{"type":"string","description":"Local file path"}},"required":["url"]}));
+
+    // Git tools
+    tool!("git", "git_status", "Show git repository status",
+        json!({"type":"object","properties":{"path":{"type":"string"}},"required":[]}));
+    tool!("git", "git_diff", "Show git diff",
+        json!({"type":"object","properties":{"path":{"type":"string"},"staged":{"type":"boolean"}},"required":[]}));
+    tool!("git", "git_log", "Show git commit history",
+        json!({"type":"object","properties":{"path":{"type":"string"},"count":{"type":"integer"}},"required":[]}));
+    tool!("git", "git_commit", "Create a git commit",
+        json!({"type":"object","properties":{"message":{"type":"string","description":"Commit message"},"path":{"type":"string"}},"required":["message"]}));
+
+    // Data tools
+    tool!("data", "db_query", "Execute SQL query on SQLite or PostgreSQL",
+        json!({"type":"object","properties":{"db_type":{"type":"string","enum":["sqlite","postgres"]},"connection":{"type":"string","description":"DB path or connection string"},"query":{"type":"string","description":"SQL query"},"params":{"type":"array","description":"Query parameters"}},"required":["db_type","connection","query"]}));
+    tool!("data", "db_schema", "Inspect database schema",
+        json!({"type":"object","properties":{"db_type":{"type":"string","enum":["sqlite","postgres"]},"connection":{"type":"string"}},"required":["db_type","connection"]}));
+
+    // Python
+    tool!("python", "python_execute", "Execute a Python script",
+        json!({"type":"object","properties":{"script":{"type":"string","description":"Python script code"},"working_dir":{"type":"string"},"timeout_ms":{"type":"integer"},"capture_files":{"type":"array","items":{"type":"string"},"description":"Paths of generated files to capture"}},"required":["script"]}));
+
+    // Archive
+    tool!("archive", "archive_compress", "Compress files to ZIP or tar.gz",
+        json!({"type":"object","properties":{"source_path":{"type":"string"},"output_path":{"type":"string"},"format":{"type":"string","enum":["zip","tar.gz"]}},"required":["source_path","output_path"]}));
+    tool!("archive", "archive_decompress", "Extract archive (ZIP or tar.gz)",
+        json!({"type":"object","properties":{"archive_path":{"type":"string"},"output_dir":{"type":"string"}},"required":["archive_path"]}));
+    tool!("archive", "archive_list", "List archive contents without extracting",
+        json!({"type":"object","properties":{"archive_path":{"type":"string"}},"required":["archive_path"]}));
+
+    // System
+    tool!("system", "clipboard_read", "Read system clipboard content",
+        json!({"type":"object","properties":{},"required":[]}));
+    tool!("system", "clipboard_write", "Write text to system clipboard",
+        json!({"type":"object","properties":{"content":{"type":"string"}},"required":["content"]}));
+
+    // Memory
+    tool!("core", "memory_read", "Read agent memory",
+        json!({"type":"object","properties":{"key":{"type":"string","description":"Memory key (omit to list all)"}},"required":[]}));
+    tool!("core", "memory_write", "Write to agent memory",
+        json!({"type":"object","properties":{"key":{"type":"string"},"value":{"type":"object"}},"required":["key","value"]}));
+
+    // Sub-agent & multi-agent
+    tool!("core", "sub_agent", "Spawn a sub-agent for a focused research or execution task",
+        json!({"type":"object","properties":{
+            "task":{"type":"string","description":"Task for the sub-agent"},
+            "max_iterations":{"type":"integer","description":"Max iterations (default 10, max 20)","default":10},
+            "allow_write":{"type":"boolean","description":"Allow write tools (file_write, bash_execute). Default false (read-only).","default":false},
+            "model_id":{"type":"string","description":"Optional model override (e.g. cheaper model for simple tasks)"}
+        },"required":["task"]}));
+    tool!("core", "multi_agent", "Run multiple agents in parallel with different personas",
+        json!({"type":"object","properties":{"task":{"type":"string"},"agents":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"role":{"type":"string"},"system_prompt":{"type":"string"}}}},"consensus":{"type":"string","enum":["none","majority_vote","synthesis"]}},"required":["task","agents"]}));
+    tool!("core", "parallel", "Execute multiple tools concurrently",
+        json!({"type":"object","properties":{"tools":{"type":"array","items":{"type":"object","properties":{"action":{"type":"string"},"args":{"type":"object"}}}}},"required":["tools"]}));
+
+    // Plan → Execute pipeline
+    tool!("core", "create_plan", "Create a structured execution plan with ordered steps. Emits plan to UI for review.",
+        json!({"type":"object","properties":{
+            "title":{"type":"string","description":"Plan title"},
+            "steps":{"type":"array","items":{"type":"object","properties":{
+                "description":{"type":"string"},
+                "tool":{"type":"string","description":"Tool to execute"},
+                "args":{"type":"object","description":"Tool arguments"},
+                "depends_on":{"type":"array","items":{"type":"integer"},"description":"Step IDs this depends on"}
+            },"required":["description","tool","args"]}}
+        },"required":["title","steps"]}));
+    tool!("core", "execute_plan", "Execute a previously created plan (by plan ID)",
+        json!({"type":"object","properties":{"plan_id":{"type":"string","description":"ID from create_plan"}},"required":["plan_id"]}));
+
+    // Workflow
+    tool!("workflow", "workflow_create", "Create a complete visual workflow on the canvas (multiple nodes and edges)",
+        json!({"type":"object","properties":{
+            "nodes":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"tool_ref":{"type":"string"},"label":{"type":"string"},"config":{"type":"object"},"position":{"type":"object","properties":{"x":{"type":"number"},"y":{"type":"number"}}}},"required":["id","tool_ref"]}},
+            "edges":{"type":"array","items":{"type":"object","properties":{"source":{"type":"string"},"source_port":{"type":"string"},"target":{"type":"string"},"target_port":{"type":"string"}},"required":["source","target"]}},
+            "clear_existing":{"type":"boolean","description":"Clear canvas first (default: false)"}
+        },"required":["nodes","edges"]}));
+    tool!("workflow", "workflow_add_node", "Add a single node to the canvas",
+        json!({"type":"object","properties":{
+            "tool_ref":{"type":"string","description":"Tool catalog ID (e.g. 'llm-chat', 'file-read')"},
+            "label":{"type":"string","description":"Display label"},
+            "config":{"type":"object","description":"Node configuration"},
+            "position":{"type":"object","properties":{"x":{"type":"number"},"y":{"type":"number"}}}
+        },"required":["tool_ref"]}));
+    tool!("workflow", "workflow_remove_node", "Remove a node from the canvas (also removes connected edges)",
+        json!({"type":"object","properties":{
+            "node_id":{"type":"string","description":"Node ID to remove"}
+        },"required":["node_id"]}));
+    tool!("workflow", "workflow_connect", "Connect two nodes with an edge",
+        json!({"type":"object","properties":{
+            "source":{"type":"string","description":"Source node ID"},
+            "source_port":{"type":"string","description":"Source port name"},
+            "target":{"type":"string","description":"Target node ID"},
+            "target_port":{"type":"string","description":"Target port name"}
+        },"required":["source","target"]}));
+    tool!("workflow", "workflow_set_config", "Set configuration values on an existing node",
+        json!({"type":"object","properties":{
+            "node_id":{"type":"string","description":"Node ID"},
+            "config":{"type":"object","description":"Configuration to set"}
+        },"required":["node_id","config"]}));
+    tool!("workflow", "workflow_select_node", "Select/highlight a node for user attention",
+        json!({"type":"object","properties":{
+            "node_id":{"type":"string","description":"Node ID to select"}
+        },"required":["node_id"]}));
+    tool!("workflow", "workflow_update_node", "Update a node's label or position",
+        json!({"type":"object","properties":{
+            "node_id":{"type":"string","description":"Node ID to update"},
+            "label":{"type":"string","description":"New display label"},
+            "position":{"type":"object","properties":{"x":{"type":"number"},"y":{"type":"number"}}}
+        },"required":["node_id"]}));
+    tool!("workflow", "workflow_remove_edge", "Remove an edge between two nodes",
+        json!({"type":"object","properties":{
+            "edge_id":{"type":"string","description":"Edge ID to remove"},
+            "source":{"type":"string","description":"Source node ID (alternative)"},
+            "target":{"type":"string","description":"Target node ID (alternative)"}
+        },"required":[]}));
+    tool!("workflow", "workflow_list", "List all nodes and edges currently on the canvas",
+        json!({"type":"object","properties":{},"required":[]}));
+    tool!("workflow", "workflow_execute", "Execute the current canvas workflow",
+        json!({"type":"object","properties":{},"required":[]}));
+
+    // Vector/RAG
+    tool!("rag", "vector_store", "Store text with embeddings in vector DB",
+        json!({"type":"object","properties":{"collection":{"type":"string"},"text":{"type":"string"},"metadata":{"type":"object"}},"required":["collection","text"]}));
+    tool!("rag", "vector_search", "Search vector DB by similarity",
+        json!({"type":"object","properties":{"collection":{"type":"string"},"query":{"type":"string"},"top_k":{"type":"integer"}},"required":["collection","query"]}));
+    tool!("rag", "api_ingest", "Fetch data from API, chunk it, embed, and store in vector DB with source tracking",
+        json!({"type":"object","properties":{
+            "url":{"type":"string","description":"API URL to fetch data from"},
+            "collection":{"type":"string","description":"Vector collection name (default: 'default')"},
+            "source_label":{"type":"string","description":"Human-readable source name"},
+            "chunk_size":{"type":"integer","description":"Characters per chunk (default: 1000)"},
+            "method":{"type":"string","enum":["GET","POST","PUT"],"description":"HTTP method (default: GET)"},
+            "headers":{"type":"object","description":"Request headers"},
+            "body":{"type":"string","description":"Request body for POST/PUT"}
+        },"required":["url"]}));
+
+    // Filter by allowed/excluded
+    if let Some(allowed_list) = allowed {
+        defs.retain(|d| allowed_list.contains(&d.name.as_str().to_string()));
+    }
+    if let Some(excluded_list) = excluded {
+        defs.retain(|d| !excluded_list.contains(&d.name.as_str().to_string()));
+    }
+
+    defs
+}
+
+/// Classify which tool categories are relevant for a given task.
+fn classify_task_tools(task: &str) -> Vec<String> {
+    let t = task.to_lowercase();
+    let mut cats = vec!["core".to_string()]; // Always: bash, file_read/write, finish, memory, sub_agent
+
+    if t.contains("search") || t.contains("grep") || t.contains("find") || t.contains("code")
+        || t.contains("function") || t.contains("class") || t.contains("import") {
+        cats.push("code".to_string());
+    }
+    if t.contains("web") || t.contains("url") || t.contains("http") || t.contains("crawl")
+        || t.contains("download") || t.contains("fetch") || t.contains("scrape") {
+        cats.push("web".to_string());
+    }
+    if t.contains("git") || t.contains("commit") || t.contains("branch") || t.contains("diff") {
+        cats.push("git".to_string());
+    }
+    if t.contains("database") || t.contains("sql") || t.contains("query") || t.contains("sqlite")
+        || t.contains("postgres") || t.contains("table") {
+        cats.push("data".to_string());
+    }
+    if t.contains("python") || t.contains("script") || t.contains("chart") || t.contains("plot")
+        || t.contains("matplotlib") || t.contains("pandas") || t.contains("numpy") {
+        cats.push("python".to_string());
+    }
+    if t.contains("zip") || t.contains("archive") || t.contains("compress") || t.contains("tar")
+        || t.contains("extract") {
+        cats.push("archive".to_string());
+    }
+    if t.contains("clipboard") || t.contains("copy") || t.contains("paste") {
+        cats.push("system".to_string());
+    }
+    if t.contains("workflow") || t.contains("canvas") || t.contains("node") || t.contains("pipeline") {
+        cats.push("workflow".to_string());
+    }
+    if t.contains("vector") || t.contains("rag") || t.contains("embedding") || t.contains("semantic")
+        || t.contains("knowledge") || t.contains("ingest") || t.contains("지식") {
+        cats.push("rag".to_string());
+    }
+    if t.contains("api") || t.contains("rest") || t.contains("endpoint") || t.contains("request") {
+        cats.push("web".to_string());
+        cats.push("rag".to_string());
+    }
+
+    // If very few categories detected, add common ones
+    if cats.len() <= 1 {
+        cats.extend(["code", "web", "git"].iter().map(|s| s.to_string()));
+    }
+
+    cats
 }
 
 /// Simple hash-based pseudo-embedding for fallback when no LLM embedding available.
@@ -1723,9 +2643,73 @@ fn simple_text_embedding(text: &str, dim: usize) -> Vec<f32> {
     vec
 }
 
-/// Mini agent loop for sub-agent tasks (max 5 iterations, read-only tools)
-async fn run_sub_agent(task: &str, app: &AppHandle, parent_conv_id: &str) -> Result<String, String> {
-    let system = "You are a research sub-agent. You can only use read-only tools: file_read, grep_search, glob_search, project_tree, web_search, web_fetch, git_status, git_log. When done, use finish with your findings.";
+/// Auto-prefix a collection name with `{project_id}__` if project_id is set
+/// and the collection name doesn't already contain `__`.
+fn scope_collection_name(collection: &str, project_id: Option<&str>) -> String {
+    match project_id {
+        Some(pid) if !collection.contains("__") => format!("{pid}__{collection}"),
+        _ => collection.to_string(),
+    }
+}
+
+/// Split text into overlapping chunks for RAG ingestion.
+/// Uses 20% overlap between chunks for context continuity.
+fn chunk_text(text: &str, chunk_size: usize) -> Vec<String> {
+    if text.len() <= chunk_size {
+        return vec![text.to_string()];
+    }
+    let overlap = chunk_size / 5; // 20% overlap
+    let step = chunk_size - overlap;
+    let chars: Vec<char> = text.chars().collect();
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    while start < chars.len() {
+        let end = (start + chunk_size).min(chars.len());
+        let chunk: String = chars[start..end].iter().collect();
+        if !chunk.trim().is_empty() {
+            chunks.push(chunk);
+        }
+        if end >= chars.len() {
+            break;
+        }
+        start += step;
+    }
+    chunks
+}
+
+/// Enhanced sub-agent loop with configurable iterations, write permissions, and model override
+async fn run_sub_agent(
+    task: &str,
+    app: &AppHandle,
+    parent_conv_id: &str,
+    max_iterations: usize,
+    allow_write: bool,
+    model_override: Option<&str>,
+) -> Result<String, String> {
+    let system = if allow_write {
+        "You are a capable sub-agent with read and write permissions. You can use file_read, file_write, grep_search, glob_search, project_tree, web_search, web_fetch, git_status, git_log, bash_execute. When done, use finish with your findings or results."
+    } else {
+        "You are a research sub-agent. You can only use read-only tools: file_read, grep_search, glob_search, project_tree, web_search, web_fetch, git_status, git_log. When done, use finish with your findings."
+    };
+
+    // Resolve active LLM provider from user settings
+    let resolved_provider = if let Some(app_state) = app.try_state::<crate::state::AppState>() {
+        if let Ok(creds) = app_state.llm_credentials.try_read() {
+            creds.active_provider.clone()
+        } else { None }
+    } else { None };
+
+    // Build function calling tool definitions for sub-agent
+    let sub_tool_categories = if allow_write {
+        vec!["core".to_string(), "file".to_string()]
+    } else {
+        vec!["core".to_string()]
+    };
+    let sub_tool_defs = build_tool_definitions(&sub_tool_categories, None, None);
+    let use_fc = matches!(
+        resolved_provider.as_deref().unwrap_or("bedrock"),
+        "bedrock" | "anthropic" | "openai"
+    );
 
     let mut messages: Vec<ChatMessage> = vec![ChatMessage {
         role: "user".to_string(),
@@ -1733,15 +2717,21 @@ async fn run_sub_agent(task: &str, app: &AppHandle, parent_conv_id: &str) -> Res
     }];
     let mut result = String::new();
 
-    for _i in 0..5 {
+    let read_only_tools = ["file_read", "grep_search", "glob_search", "project_tree",
+                          "web_search", "web_fetch", "git_status", "git_log", "memory_read"];
+    let write_tools = ["file_write", "bash_execute", "file_create"];
+
+    for _i in 0..max_iterations {
         let llm_req = LLMRequest {
             prompt: String::new(),
             system_prompt: Some(system.to_string()),
             messages: Some(messages.clone()),
-            model_id: None,
+            model_id: model_override.map(String::from),
             max_tokens: Some(2048),
             temperature: Some(0.2),
-            provider: None,
+            provider: resolved_provider.clone(),
+            tools: if use_fc { Some(sub_tool_defs.clone()) } else { None },
+            tool_choice: if use_fc { Some("auto".to_string()) } else { None },
         };
 
         let resp = invoke_llm(llm_req).await.map_err(|e| format!("Sub-agent LLM error: {e}"))?;
@@ -1750,19 +2740,33 @@ async fn run_sub_agent(task: &str, app: &AppHandle, parent_conv_id: &str) -> Res
             content: resp.text.clone(),
         });
 
-        if let Some(act) = parse_action(&resp.text) {
+        // Try function calling first, then fall back to text parsing
+        let action = if let Some(ref tc) = resp.tool_calls {
+            tc.first().map(|t| AgentAction {
+                tool: t.name.clone(),
+                args: t.input.clone(),
+            })
+        } else {
+            parse_action(&resp.text)
+        };
+
+        if let Some(act) = action {
             if act.tool == "finish" {
-                result = act.args["answer"].as_str().unwrap_or("").to_string();
+                result = act.args["answer"].as_str()
+                    .or_else(|| act.args["result"].as_str())
+                    .unwrap_or("")
+                    .to_string();
                 break;
             }
 
-            // Only allow read-only tools
-            let read_only = ["file_read", "grep_search", "glob_search", "project_tree",
-                           "web_search", "web_fetch", "git_status", "git_log", "memory_read"];
-            if !read_only.contains(&act.tool.as_str()) {
+            // Permission check
+            let allowed = read_only_tools.contains(&act.tool.as_str())
+                || (allow_write && write_tools.contains(&act.tool.as_str()));
+            if !allowed {
                 messages.push(ChatMessage {
                     role: "user".to_string(),
-                    content: format!("[Tool Error] Sub-agents can only use read-only tools. '{}' is not allowed.", act.tool),
+                    content: format!("[Tool Error] Sub-agent cannot use '{}'. Allowed: read-only{}.", act.tool,
+                        if allow_write { " + write tools" } else { " only" }),
                 });
                 continue;
             }
@@ -1771,7 +2775,7 @@ async fn run_sub_agent(task: &str, app: &AppHandle, parent_conv_id: &str) -> Res
                 Ok(r) => r,
                 Err(e) => format!("Error: {e}"),
             };
-            let truncated: String = obs.chars().take(5000).collect();
+            let truncated: String = obs.chars().take(8000).collect();
             messages.push(ChatMessage {
                 role: "user".to_string(),
                 content: format!("[Tool Result: {}]\n{truncated}", act.tool),
@@ -1783,7 +2787,7 @@ async fn run_sub_agent(task: &str, app: &AppHandle, parent_conv_id: &str) -> Res
     }
 
     if result.is_empty() {
-        result = "Sub-agent did not produce a result within iteration limit.".to_string();
+        result = format!("Sub-agent did not produce a result within {max_iterations} iterations.");
     }
 
     Ok(result)
@@ -2048,6 +3052,18 @@ pub async fn run_agent_loop(
     conversations: &Arc<AgentConversationState>,
     app: &AppHandle,
 ) -> Result<AgentLoopResult, String> {
+    // Resolve provider: use request.provider, or fall back to user's active_provider from settings
+    let mut request = request;
+    if request.provider.is_none() {
+        if let Some(app_state) = app.try_state::<crate::state::AppState>() {
+            if let Ok(creds) = app_state.llm_credentials.try_read() {
+                if let Some(ref p) = creds.active_provider {
+                    request.provider = Some(p.to_string());
+                }
+            }
+        }
+    }
+
     let max_iters = request.max_iterations.unwrap_or(25).min(50);
     let working_dir = request.working_dir.clone().unwrap_or_else(|| ".".to_string());
     let conv_id = request.conversation_id.clone()
@@ -2059,11 +3075,48 @@ pub async fn run_agent_loop(
     // Build per-project context (plan + memory keys)
     let project_context = build_project_context(project_id.as_deref());
 
+    // Auto-create scoped default vector collection for the project
+    let kb_context = if let Some(ref pid) = project_id {
+        let default_coll = format!("{pid}__default");
+        if let Some(vs_state) = app.try_state::<Arc<VectorStoreState>>() {
+            let mut colls = vs_state.collections.write().await;
+            if !colls.contains_key(&default_coll) {
+                colls.insert(default_coll.clone(), vector_store::VectorCollection {
+                    name: default_coll.clone(),
+                    dimension: 128,
+                    entries: Vec::new(),
+                    created_at: chrono::Utc::now().to_rfc3339(),
+                });
+            }
+            let entry_count = colls.get(&default_coll).map(|c| c.entries.len()).unwrap_or(0);
+            drop(colls);
+            Some(format!(
+                "\n## Your Knowledge Base\nYou have a dedicated vector collection: `{default_coll}` ({entry_count} entries)\n\
+                 - Use vector_store with collection \"default\" to save knowledge (auto-scoped to your project)\n\
+                 - Use vector_search with collection \"default\" to search your knowledge base\n\
+                 - Use api_ingest to fetch API data and automatically store it with source tracking\n\
+                 - Collection names are auto-prefixed with your project ID — just use short names like \"default\", \"research\", etc.\n"
+            ))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Combine project context with knowledge base context
+    let full_context = match (&project_context, &kb_context) {
+        (Some(pc), Some(kc)) => Some(format!("{pc}\n{kc}")),
+        (Some(pc), None) => Some(pc.clone()),
+        (None, Some(kc)) => Some(kc.clone()),
+        (None, None) => None,
+    };
+
     let system_prompt = build_system_prompt(
         request.system_prompt.as_deref(),
         &working_dir,
         mode,
-        project_context.as_deref(),
+        full_context.as_deref(),
     );
 
     // Load or create conversation history
@@ -2161,6 +3214,34 @@ pub async fn run_agent_loop(
                     }
                 }
 
+                // Build function calling tool definitions (dynamic filtering + pinned/excluded)
+                let tool_categories = classify_task_tools(&request.task);
+                let tool_defs = build_tool_definitions(
+                    &tool_categories,
+                    request.allowed_tools.as_deref(),
+                    request.excluded_tools.as_deref(),
+                );
+                // Merge pinned tools (always included regardless of category filtering)
+                let tool_defs = if let Some(ref pinned) = request.pinned_tools {
+                    let pinned_categories = vec!["core".to_string(), "file".to_string(), "web".to_string(), "data".to_string(), "system".to_string(), "agent".to_string()];
+                    let all_defs = build_tool_definitions(&pinned_categories, Some(pinned), request.excluded_tools.as_deref());
+                    let existing_names: std::collections::HashSet<String> = tool_defs.iter().map(|t| t.name.clone()).collect();
+                    let mut merged = tool_defs;
+                    for td in all_defs {
+                        if !existing_names.contains(&td.name) {
+                            merged.push(td);
+                        }
+                    }
+                    merged
+                } else {
+                    tool_defs
+                };
+                // Only use function calling for providers that support it
+                let use_function_calling = matches!(
+                    request.provider.as_deref().unwrap_or("bedrock"),
+                    "bedrock" | "anthropic" | "openai"
+                );
+
                 let llm_request = LLMRequest {
                     prompt: String::new(), // unused when messages is provided
                     system_prompt: Some(system_prompt.clone()),
@@ -2169,6 +3250,8 @@ pub async fn run_agent_loop(
                     max_tokens: Some(4096),
                     temperature: Some(0.3),
                     provider: request.provider.clone(),
+                    tools: if use_function_calling { Some(tool_defs) } else { None },
+                    tool_choice: if use_function_calling { Some("auto".to_string()) } else { None },
                 };
 
                 let sid = if attempt == 0 {
@@ -2178,7 +3261,7 @@ pub async fn run_agent_loop(
                 };
 
                 match invoke_llm_stream(llm_request, sid, app.clone()).await {
-                    Ok(resp) if !resp.text.trim().is_empty() => {
+                    Ok(resp) if !resp.text.trim().is_empty() || resp.tool_calls.is_some() => {
                         conversations.llm_circuit.record_success();
                         response = Some(resp);
                         break;
@@ -2228,7 +3311,20 @@ pub async fn run_agent_loop(
         }
 
         let thought = extract_thought(&llm_response.text);
-        let action = parse_action(&llm_response.text);
+
+        // Function calling: prefer structured tool_calls, fallback to parse_action
+        let action = if let Some(ref tool_calls) = llm_response.tool_calls {
+            if let Some(tc) = tool_calls.first() {
+                Some(AgentAction {
+                    tool: tc.name.clone(),
+                    args: tc.input.clone(),
+                })
+            } else {
+                parse_action(&llm_response.text)
+            }
+        } else {
+            parse_action(&llm_response.text)
+        };
 
         // Add assistant message to history
         history.push(ConversationMessage {

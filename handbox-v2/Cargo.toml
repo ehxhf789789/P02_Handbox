@@ -37,12 +37,20 @@ jmespath = "0.3"
 async-recursion = "1"
 
 # HTTP & AWS
-reqwest = { version = "0.12", features = ["json", "native-tls"] }
+reqwest = { version = "0.12", features = ["json", "native-tls", "stream"] }
 hmac = "0.12"
 base64 = "0.22"
 dirs = "5"
 url = "2"
 urlencoding = "2"
+
+# Tools: web crawling, archive, clipboard, database
+scraper = "0.22"
+zip = "2"
+flate2 = "1"
+tar = "0.4"
+arboard = "3"
+tokio-postgres = "0.7"
 
 # Internal crates
 hb-core = { path = "crates/hb-core" }

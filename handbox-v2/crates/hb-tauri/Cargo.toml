@@ -36,6 +36,13 @@ regex-lite = "0.1"
 tauri = { version = "2", features = ["devtools"] }
 tauri-plugin-dialog = "2"
 tauri-build = { version = "2", features = [] }
+scraper = { workspace = true }
+zip = { workspace = true }
+flate2 = { workspace = true }
+tar = { workspace = true }
+arboard = { workspace = true }
+tokio-postgres = { workspace = true }
+rusqlite = { workspace = true }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

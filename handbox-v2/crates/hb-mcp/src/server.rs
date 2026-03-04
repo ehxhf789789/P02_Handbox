@@ -158,6 +158,7 @@ impl McpServer {
             tool_ref: tool.tool_id.clone(),
             inputs: arguments,
             config: serde_json::json!({}),
+            llm_provider: None,
         };
 
         // Execute with timeout

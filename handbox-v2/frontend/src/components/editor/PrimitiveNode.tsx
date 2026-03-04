@@ -1,5 +1,5 @@
 /**
- * PrimitiveNode — custom XYFlow node with input/output ports.
+ * PrimitiveNode — custom XYFlow node with input/output ports and inline result preview.
  */
 
 import { Handle, Position, type NodeProps } from '@xyflow/react'
@@ -8,6 +8,7 @@ import type { NodeData } from '@/stores/workflowStore'
 import { getCategoryColor, allTools } from '@/data/toolCatalog'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import { useExecutionStore } from '@/stores/executionStore'
+import { NodeInlinePreview } from './previews/NodeInlinePreview'
 import type { ExecutionStatus } from '@/types/trace'
 import {
   FileText, Save, MessageSquare, Monitor,
@@ -20,6 +21,7 @@ import {
   Brain, Search, Type, Database, Download, FileInput,
   Sparkles, Terminal, Globe,
   CheckCircle2, XCircle, Loader2, Clock,
+  Archive, Code, Clipboard, PlayCircle,
 } from 'lucide-react'
 
 const iconMap: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
@@ -32,6 +34,7 @@ const iconMap: Record<string, React.ComponentType<{ size?: number; className?: s
   FileDown, Sheet, CircleDot,
   Brain, Search, Type, Database, Download, FileInput,
   Sparkles, Terminal, Globe,
+  Archive, Code, Clipboard, PlayCircle,
 }
 
 // Execution status styling
@@ -43,33 +46,33 @@ function getStatusStyles(status: ExecutionStatus | undefined): {
   switch (status) {
     case 'running':
       return {
-        borderColor: '#3b82f6', // blue-500
+        borderColor: '#3b82f6',
         glowColor: '0 0 12px rgba(59, 130, 246, 0.5)',
         statusIcon: <Loader2 size={14} className="text-blue-500 animate-spin" />,
       }
     case 'completed':
     case 'cache_hit':
       return {
-        borderColor: '#22c55e', // green-500
+        borderColor: '#22c55e',
         glowColor: '0 0 12px rgba(34, 197, 94, 0.4)',
         statusIcon: <CheckCircle2 size={14} className="text-green-500" />,
       }
     case 'failed':
       return {
-        borderColor: '#ef4444', // red-500
+        borderColor: '#ef4444',
         glowColor: '0 0 12px rgba(239, 68, 68, 0.5)',
         statusIcon: <XCircle size={14} className="text-red-500" />,
       }
     case 'pending':
       return {
-        borderColor: '#a855f7', // purple-500 (waiting)
+        borderColor: '#a855f7',
         glowColor: 'none',
         statusIcon: <Clock size={14} className="text-purple-400" />,
       }
     case 'skipped':
     case 'cancelled':
       return {
-        borderColor: '#737373', // neutral-500
+        borderColor: '#737373',
         glowColor: 'none',
         statusIcon: null,
       }
@@ -83,10 +86,10 @@ function getStatusStyles(status: ExecutionStatus | undefined): {
 }
 
 // Layout constants for precise handle alignment
-const HEADER_HEIGHT = 40 // Header with icon and label
-const PORT_ROW_HEIGHT = 18 // Each port row height
-const PORTS_PADDING_TOP = 8 // py-2 top
-const SEPARATOR_HEIGHT = 12 // Separator between inputs and outputs (border + my-1)
+const HEADER_HEIGHT = 40
+const PORT_ROW_HEIGHT = 18
+const PORTS_PADDING_TOP = 8
+const SEPARATOR_HEIGHT = 12
 
 function PrimitiveNodeInner({ id, data, selected }: NodeProps) {
   const nodeData = data as NodeData
@@ -94,6 +97,7 @@ function PrimitiveNodeInner({ id, data, selected }: NodeProps) {
   const selectNode = useWorkflowStore((s) => s.selectNode)
   const currentExecution = useExecutionStore((s) => s.currentExecution)
   const rawNodeStatus = useExecutionStore((s) => s.nodeStatuses[id])
+  const nodeDetail = useExecutionStore((s) => s.nodeDetails[id])
   const agentHighlightNodeId = useExecutionStore((s) => s.agentHighlightNodeId)
   const toolDef = allTools.find((t) => t.id === nodeData.toolRef)
   const IconComp = iconMap[toolDef?.icon ?? ''] ?? CircleDot
@@ -101,13 +105,12 @@ function PrimitiveNodeInner({ id, data, selected }: NodeProps) {
   // Only show execution status if there's an active execution
   const nodeStatus = currentExecution ? rawNodeStatus : undefined
 
-  // Agent highlight: purple glow when agent is interacting with this node's tool
+  // Agent highlight
   const isAgentHighlighted = agentHighlightNodeId === id
 
-  // Get status-based styling
   const statusStyles = getStatusStyles(nodeStatus)
   const effectiveBorderColor = isAgentHighlighted
-    ? '#8b5cf6' // violet-500 for agent highlight
+    ? '#8b5cf6'
     : nodeStatus
       ? statusStyles.borderColor
       : (selected ? color : '#333333')
@@ -117,26 +120,27 @@ function PrimitiveNodeInner({ id, data, selected }: NodeProps) {
       ? statusStyles.glowColor
       : 'none'
 
-  // Calculate handle positions
+  // Handle positions
   const getInputHandleTop = (index: number) => {
-    // Header + padding + row center
     return HEADER_HEIGHT + PORTS_PADDING_TOP + (index * PORT_ROW_HEIGHT) + (PORT_ROW_HEIGHT / 2)
   }
 
   const getOutputHandleTop = (index: number) => {
     const inputsHeight = nodeData.inputs.length * PORT_ROW_HEIGHT
     const separatorOffset = nodeData.inputs.length > 0 ? SEPARATOR_HEIGHT : 0
-    // Header + padding + inputs + separator + row center
     return HEADER_HEIGHT + PORTS_PADDING_TOP + inputsHeight + separatorOffset + (index * PORT_ROW_HEIGHT) + (PORT_ROW_HEIGHT / 2)
   }
+
+  // Preview data
+  const hasResult = nodeDetail && (nodeStatus === 'completed' || nodeStatus === 'cache_hit' || nodeStatus === 'failed')
 
   return (
     <div
       onClick={() => selectNode(id)}
       className="relative group"
-      style={{ minWidth: 180 }}
+      style={{ minWidth: 180, maxWidth: 280 }}
     >
-      {/* Input handles - aligned with port labels */}
+      {/* Input handles */}
       {nodeData.inputs.map((inp, i) => (
         <Handle
           key={`in-${inp.name}`}
@@ -177,7 +181,6 @@ function PrimitiveNodeInner({ id, data, selected }: NodeProps) {
           <span className="text-xs font-semibold truncate flex-1" style={{ color }}>
             {nodeData.label}
           </span>
-          {/* Execution status icon */}
           {statusStyles.statusIcon && (
             <div className="flex-shrink-0">
               {statusStyles.statusIcon}
@@ -213,9 +216,21 @@ function PrimitiveNodeInner({ id, data, selected }: NodeProps) {
             </div>
           ))}
         </div>
+
+        {/* Rich inline result preview */}
+        {hasResult && (
+          <NodeInlinePreview
+            nodeId={id}
+            toolRef={nodeData.toolRef}
+            output={nodeDetail.output}
+            error={nodeDetail.error}
+            config={nodeData.config}
+            duration_ms={nodeDetail.duration_ms}
+          />
+        )}
       </div>
 
-      {/* Output handles - aligned with port labels */}
+      {/* Output handles */}
       {nodeData.outputs.map((out, i) => (
         <Handle
           key={`out-${out.name}`}

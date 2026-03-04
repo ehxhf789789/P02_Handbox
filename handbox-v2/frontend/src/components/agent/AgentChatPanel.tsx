@@ -42,6 +42,12 @@ import {
   History,
   MessageCircle,
   Plus,
+  Paperclip,
+  Download,
+  Archive,
+  Database,
+  PlayCircle,
+  Clipboard,
 } from 'lucide-react'
 import { safeInvoke, safeListen } from '@/utils/tauri'
 import { useWorkflowStore } from '@/stores/workflowStore'
@@ -111,6 +117,8 @@ const toolIcons: Record<string, typeof Terminal> = {
   project_tree: FileText,
   web_search: Globe,
   web_fetch: Globe,
+  web_crawl: Globe,
+  file_download: Download,
   git_status: GitBranch,
   git_diff: GitBranch,
   git_log: GitBranch,
@@ -123,6 +131,15 @@ const toolIcons: Record<string, typeof Terminal> = {
   workflow_add_node: Sparkles,
   workflow_remove_node: Sparkles,
   workflow_connect: Sparkles,
+  archive_compress: Archive,
+  archive_decompress: Archive,
+  archive_list: Archive,
+  db_query: Database,
+  db_schema: Database,
+  python_execute: PlayCircle,
+  python: PlayCircle,
+  clipboard_read: Clipboard,
+  clipboard_write: Clipboard,
 }
 
 const toolColors: Record<string, string> = {
@@ -136,6 +153,8 @@ const toolColors: Record<string, string> = {
   project_tree: '#06b6d4',
   web_search: '#ec4899',
   web_fetch: '#ec4899',
+  web_crawl: '#0ea5e9',
+  file_download: '#0ea5e9',
   git_status: '#f59e0b',
   git_diff: '#f59e0b',
   git_log: '#f59e0b',
@@ -148,6 +167,15 @@ const toolColors: Record<string, string> = {
   workflow_add_node: '#f59e0b',
   workflow_remove_node: '#f59e0b',
   workflow_connect: '#f59e0b',
+  archive_compress: '#78716c',
+  archive_decompress: '#78716c',
+  archive_list: '#78716c',
+  db_query: '#6366f1',
+  db_schema: '#6366f1',
+  python_execute: '#22c55e',
+  python: '#22c55e',
+  clipboard_read: '#64748b',
+  clipboard_write: '#64748b',
 }
 
 // ============================================================
@@ -798,6 +826,7 @@ export function AgentChatPanel({ onClose }: AgentChatPanelProps) {
   const activeProject = useProjectStore(s => s.activeProject)
   const [messages, setMessages] = useState<AgentMessage[]>([])
   const [input, setInput] = useState('')
+  const [attachedFiles, setAttachedFiles] = useState<string[]>([])
   const [isRunning, setIsRunning] = useState(false)
   const [streamEvent, setStreamEvent] = useState<StreamEvent | null>(null)
   const [streamingText, setStreamingText] = useState('')
@@ -808,6 +837,9 @@ export function AgentChatPanel({ onClose }: AgentChatPanelProps) {
   const [mode, setMode] = useState<AgentMode>('auto')
   const [showSettings, setShowSettings] = useState(false)
   const [maxIterations, setMaxIterations] = useState(25)
+  const [pinnedTools, setPinnedTools] = useState<string[]>([])
+  const [excludedTools, setExcludedTools] = useState<string[]>([])
+  const [showToolFilter, setShowToolFilter] = useState(false)
   const [permissionRequest, setPermissionRequest] = useState<{
     request_id: string; command: string; warning: string
   } | null>(null)
@@ -1020,11 +1052,40 @@ export function AgentChatPanel({ onClose }: AgentChatPanelProps) {
     }
   }, [])
 
+  const handleFileAttach = useCallback(async () => {
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog')
+      const selected = await open({
+        multiple: true,
+        filters: [
+          { name: 'All Files', extensions: ['*'] },
+          { name: 'Documents', extensions: ['pdf', 'txt', 'md', 'docx', 'hwpx'] },
+          { name: 'Data', extensions: ['csv', 'xlsx', 'json', 'xml', 'yaml'] },
+          { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'svg'] },
+          { name: 'Code', extensions: ['py', 'js', 'ts', 'rs', 'java', 'cpp', 'c', 'h'] },
+        ],
+      })
+      if (selected) {
+        const paths = Array.isArray(selected) ? selected : [selected]
+        setAttachedFiles(prev => [...prev, ...paths.filter(p => p && !prev.includes(p))])
+      }
+    } catch (e) {
+      console.warn('File dialog failed:', e)
+    }
+  }, [])
+
   const handleSubmit = useCallback(async () => {
-    if (!input.trim() || isRunning) return
+    if ((!input.trim() && attachedFiles.length === 0) || isRunning) return
     let task = input.trim()
     setInput('')
     setStreamingText('')
+
+    // Prepend attached file paths to the task
+    if (attachedFiles.length > 0) {
+      const fileContext = attachedFiles.map(f => `[첨부 파일: ${f}]`).join('\n')
+      task = task ? `${fileContext}\n\n${task}` : fileContext
+      setAttachedFiles([])
+    }
 
     // Inject canvas context for workflow-related queries
     const wfKeywords = ['workflow', 'canvas', 'node', '워크플로우', '노드', '연결', '파이프라인', 'pipeline']
@@ -1073,6 +1134,8 @@ export function AgentChatPanel({ onClose }: AgentChatPanelProps) {
           working_dir: workingDir || undefined,
           max_iterations: maxIterations,
           mode: mode === 'auto' ? undefined : mode,
+          pinned_tools: pinnedTools.length > 0 ? pinnedTools : undefined,
+          excluded_tools: excludedTools.length > 0 ? excludedTools : undefined,
           project_id: activeProject?.id || undefined,
         },
       })
@@ -1274,27 +1337,93 @@ export function AgentChatPanel({ onClose }: AgentChatPanelProps) {
 
         {/* Settings panel (collapsible) */}
         {showSettings && (
-          <div className="px-4 py-2 border-b border-neutral-800 bg-neutral-900/30 flex items-center gap-4 text-xs">
-            <label className="flex items-center gap-2 text-neutral-400">
-              Max iterations:
-              <input
-                type="number"
-                min={1}
-                max={50}
-                value={maxIterations}
-                onChange={(e) => setMaxIterations(Math.min(50, Math.max(1, parseInt(e.target.value) || 25)))}
-                className="w-14 px-1.5 py-0.5 rounded bg-neutral-800 border border-neutral-700 text-neutral-200 text-center"
-              />
-            </label>
-            <label className="flex items-center gap-2 text-neutral-400">
-              Working dir:
-              <input
-                type="text"
-                value={workingDir}
-                onChange={(e) => setWorkingDir(e.target.value)}
-                className="flex-1 px-1.5 py-0.5 rounded bg-neutral-800 border border-neutral-700 text-neutral-200 font-mono text-[10px] min-w-[200px]"
-              />
-            </label>
+          <div className="border-b border-neutral-800 bg-neutral-900/30">
+            <div className="px-4 py-2 flex items-center gap-4 text-xs">
+              <label className="flex items-center gap-2 text-neutral-400">
+                Max iterations:
+                <input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={maxIterations}
+                  onChange={(e) => setMaxIterations(Math.min(50, Math.max(1, parseInt(e.target.value) || 25)))}
+                  className="w-14 px-1.5 py-0.5 rounded bg-neutral-800 border border-neutral-700 text-neutral-200 text-center"
+                />
+              </label>
+              <label className="flex items-center gap-2 text-neutral-400">
+                Working dir:
+                <input
+                  type="text"
+                  value={workingDir}
+                  onChange={(e) => setWorkingDir(e.target.value)}
+                  className="flex-1 px-1.5 py-0.5 rounded bg-neutral-800 border border-neutral-700 text-neutral-200 font-mono text-[10px] min-w-[200px]"
+                />
+              </label>
+              <button
+                onClick={() => setShowToolFilter(!showToolFilter)}
+                className={`px-2 py-0.5 rounded text-[10px] ${showToolFilter ? 'bg-violet-600/20 text-violet-400' : 'bg-neutral-800 text-neutral-500 hover:text-neutral-300'}`}
+              >
+                Tool Filter {pinnedTools.length + excludedTools.length > 0 ? `(${pinnedTools.length}P/${excludedTools.length}X)` : ''}
+              </button>
+            </div>
+            {showToolFilter && (
+              <div className="px-4 py-2 border-t border-neutral-800/50 space-y-2">
+                <div className="flex items-start gap-2">
+                  <span className="text-[10px] text-green-400 w-16 shrink-0 pt-0.5">Pinned:</span>
+                  <div className="flex-1">
+                    <div className="flex flex-wrap gap-1 mb-1">
+                      {pinnedTools.map(t => (
+                        <span key={t} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-green-900/30 text-green-400 text-[10px]">
+                          {t}
+                          <button onClick={() => setPinnedTools(prev => prev.filter(x => x !== t))} className="hover:text-white">×</button>
+                        </span>
+                      ))}
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Add pinned tool name + Enter"
+                      className="w-full px-1.5 py-0.5 rounded bg-neutral-800 border border-neutral-700 text-neutral-200 text-[10px]"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          const val = (e.target as HTMLInputElement).value.trim()
+                          if (val && !pinnedTools.includes(val)) {
+                            setPinnedTools(prev => [...prev, val])
+                          }
+                          ;(e.target as HTMLInputElement).value = ''
+                        }
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="text-[10px] text-red-400 w-16 shrink-0 pt-0.5">Excluded:</span>
+                  <div className="flex-1">
+                    <div className="flex flex-wrap gap-1 mb-1">
+                      {excludedTools.map(t => (
+                        <span key={t} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-red-900/30 text-red-400 text-[10px]">
+                          {t}
+                          <button onClick={() => setExcludedTools(prev => prev.filter(x => x !== t))} className="hover:text-white">×</button>
+                        </span>
+                      ))}
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Add excluded tool name + Enter"
+                      className="w-full px-1.5 py-0.5 rounded bg-neutral-800 border border-neutral-700 text-neutral-200 text-[10px]"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          const val = (e.target as HTMLInputElement).value.trim()
+                          if (val && !excludedTools.includes(val)) {
+                            setExcludedTools(prev => [...prev, val])
+                          }
+                          ;(e.target as HTMLInputElement).value = ''
+                        }
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -1398,8 +1527,48 @@ export function AgentChatPanel({ onClose }: AgentChatPanelProps) {
         />
 
         {/* Input */}
-        <div className="border-t border-neutral-800 p-3 bg-neutral-900/30">
+        <div
+          className="border-t border-neutral-800 p-3 bg-neutral-900/30"
+          onDragOver={(e) => { e.preventDefault(); e.stopPropagation() }}
+          onDrop={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            const files = Array.from(e.dataTransfer.files)
+            if (files.length > 0) {
+              const paths = files.map(f => (f as unknown as { path?: string }).path || f.name).filter(Boolean)
+              setAttachedFiles(prev => [...prev, ...paths.filter(p => !prev.includes(p))])
+            }
+          }}
+        >
+          {/* Attached file chips */}
+          {attachedFiles.length > 0 && (
+            <div className="flex flex-wrap gap-1 max-w-3xl mx-auto mb-2">
+              {attachedFiles.map((f, i) => (
+                <span
+                  key={i}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-900/40 border border-violet-700/50 text-[10px] text-violet-300"
+                >
+                  <FileText size={10} />
+                  <span className="max-w-[200px] truncate">{f.split(/[/\\]/).pop()}</span>
+                  <button
+                    onClick={() => setAttachedFiles(prev => prev.filter((_, j) => j !== i))}
+                    className="hover:text-red-400 transition-colors"
+                  >
+                    <X size={10} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
           <div className="flex items-end gap-2 max-w-3xl mx-auto">
+            <button
+              onClick={handleFileAttach}
+              disabled={isRunning}
+              className="p-2 rounded-lg text-neutral-500 hover:text-violet-400 hover:bg-neutral-800 disabled:opacity-40 shrink-0 transition-colors"
+              title="파일 첨부"
+            >
+              <Paperclip size={18} />
+            </button>
             <textarea
               ref={inputRef}
               value={input}
@@ -1437,7 +1606,7 @@ export function AgentChatPanel({ onClose }: AgentChatPanelProps) {
               <button
                 data-agent-submit
                 onClick={handleSubmit}
-                disabled={!input.trim()}
+                disabled={!input.trim() && attachedFiles.length === 0}
                 className="p-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
               >
                 <Send size={18} />
@@ -1445,7 +1614,7 @@ export function AgentChatPanel({ onClose }: AgentChatPanelProps) {
             )}
           </div>
           <p className="text-center text-[10px] text-neutral-700 mt-1.5">
-            Enter로 전송 · Shift+Enter로 줄바꿈 · Ctrl+Shift+A로 토글
+            Enter로 전송 · Shift+Enter로 줄바꿈 · 파일 드래그&드롭 가능
           </p>
         </div>
       </div>

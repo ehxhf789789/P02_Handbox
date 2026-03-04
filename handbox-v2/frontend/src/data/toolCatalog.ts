@@ -218,6 +218,38 @@ export const toolCategories: ToolCategory[] = [
           ],
         }],
       },
+      {
+        id: 'http-request',
+        label: 'HTTP Request',
+        category: 'io',
+        description: 'Make HTTP/REST API requests (GET, POST, PUT, DELETE). Supports custom headers, authentication, and JSON body.',
+        icon: 'Globe',
+        inputs: [],
+        outputs: [
+          { name: 'response', type: 'string' },
+          { name: 'status', type: 'number' },
+          { name: 'response_json', type: 'json' },
+        ],
+        configFields: [
+          { name: 'url', type: 'string', label: 'URL', default: '' },
+          {
+            name: 'method',
+            type: 'select',
+            label: 'Method',
+            default: 'GET',
+            options: [
+              { value: 'GET', label: 'GET' },
+              { value: 'POST', label: 'POST' },
+              { value: 'PUT', label: 'PUT' },
+              { value: 'DELETE', label: 'DELETE' },
+              { value: 'PATCH', label: 'PATCH' },
+            ],
+          },
+          { name: 'headers', type: 'string', label: 'Headers (JSON)', default: '{}' },
+          { name: 'body', type: 'string', label: 'Request Body', default: '' },
+          { name: 'params', type: 'string', label: 'Query Parameters (JSON)', default: '{}' },
+        ],
+      },
     ],
   },
   {
@@ -618,6 +650,212 @@ export const toolCategories: ToolCategory[] = [
     icon: 'FileDown',
     color: '#991b1b',
     tools: [], // Loaded from fusionToolCatalog
+  },
+  // ── Web & Download ──────────────────────────
+  {
+    id: 'web',
+    label: 'Web & Download',
+    icon: 'Globe',
+    color: '#0ea5e9',
+    tools: [
+      {
+        id: 'web-crawl',
+        label: 'Web Crawl',
+        category: 'web',
+        description: 'Crawl a website with BFS, extract content via CSS selectors',
+        icon: 'Globe',
+        inputs: [{ name: 'url', type: 'string', required: true }],
+        outputs: [
+          { name: 'pages', type: 'array', description: 'Array of crawled page objects' },
+          { name: 'count', type: 'number' },
+        ],
+        configFields: [
+          { name: 'url', type: 'string', label: 'Start URL', default: '' },
+          { name: 'max_depth', type: 'number', label: 'Max Depth', default: 2 },
+          { name: 'max_pages', type: 'number', label: 'Max Pages', default: 10 },
+          { name: 'selector', type: 'string', label: 'CSS Selector (optional)', default: '' },
+          { name: 'follow_pattern', type: 'string', label: 'Follow URL Pattern (regex)', default: '' },
+        ],
+      },
+      {
+        id: 'file-download',
+        label: 'File Download',
+        category: 'web',
+        description: 'Download a file from URL with streaming progress',
+        icon: 'Download',
+        inputs: [{ name: 'url', type: 'string', required: true }],
+        outputs: [
+          { name: 'path', type: 'string' },
+          { name: 'size_bytes', type: 'number' },
+          { name: 'content_type', type: 'string' },
+        ],
+        configFields: [
+          { name: 'url', type: 'string', label: 'Download URL', default: '' },
+          { name: 'output_dir', type: 'folder', label: 'Output Directory', default: '' },
+          { name: 'filename', type: 'string', label: 'Filename (auto if empty)', default: '' },
+        ],
+      },
+    ],
+  },
+  // ── Archive ──────────────────────────
+  {
+    id: 'archive',
+    label: 'Archive',
+    icon: 'Archive',
+    color: '#78716c',
+    tools: [
+      {
+        id: 'archive-compress',
+        label: 'Compress',
+        category: 'archive',
+        description: 'Create ZIP or tar.gz archive from files/folders',
+        icon: 'Archive',
+        inputs: [{ name: 'paths', type: 'array', required: true }],
+        outputs: [{ name: 'path', type: 'string' }, { name: 'size_bytes', type: 'number' }],
+        configFields: [
+          { name: 'output_path', type: 'string', label: 'Output Archive Path', default: '' },
+          {
+            name: 'format',
+            type: 'select',
+            label: 'Format',
+            default: 'zip',
+            options: [
+              { value: 'zip', label: 'ZIP' },
+              { value: 'tar.gz', label: 'tar.gz' },
+            ],
+          },
+        ],
+      },
+      {
+        id: 'archive-decompress',
+        label: 'Decompress',
+        category: 'archive',
+        description: 'Extract ZIP or tar.gz archive',
+        icon: 'Archive',
+        inputs: [{ name: 'path', type: 'string', required: true }],
+        outputs: [{ name: 'output_dir', type: 'string' }, { name: 'files', type: 'array' }],
+        configFields: [
+          { name: 'archive_path', type: 'file', label: 'Archive File', default: '', fileFilters: [{ name: 'Archives', extensions: ['zip', 'tar.gz', 'tgz'] }] },
+          { name: 'output_dir', type: 'folder', label: 'Extract To', default: '' },
+        ],
+      },
+      {
+        id: 'archive-list',
+        label: 'List Archive',
+        category: 'archive',
+        description: 'List contents of an archive without extracting',
+        icon: 'Archive',
+        inputs: [{ name: 'path', type: 'string', required: true }],
+        outputs: [{ name: 'entries', type: 'array' }],
+        configFields: [
+          { name: 'archive_path', type: 'file', label: 'Archive File', default: '', fileFilters: [{ name: 'Archives', extensions: ['zip', 'tar.gz', 'tgz'] }] },
+        ],
+      },
+    ],
+  },
+  // ── Database ──────────────────────────
+  {
+    id: 'database',
+    label: 'Database',
+    icon: 'Database',
+    color: '#6366f1',
+    tools: [
+      {
+        id: 'db-query',
+        label: 'DB Query',
+        category: 'database',
+        description: 'Execute SQL query against SQLite or PostgreSQL',
+        icon: 'Database',
+        inputs: [{ name: 'query', type: 'string', required: true }],
+        outputs: [{ name: 'rows', type: 'array' }, { name: 'row_count', type: 'number' }],
+        configFields: [
+          {
+            name: 'db_type',
+            type: 'select',
+            label: 'Database Type',
+            default: 'sqlite',
+            options: [
+              { value: 'sqlite', label: 'SQLite' },
+              { value: 'postgres', label: 'PostgreSQL' },
+            ],
+          },
+          { name: 'connection', type: 'string', label: 'Connection (path or URL)', default: '' },
+          { name: 'query', type: 'string', label: 'SQL Query', default: '' },
+        ],
+      },
+      {
+        id: 'db-schema',
+        label: 'DB Schema',
+        category: 'database',
+        description: 'Inspect database schema (tables, columns)',
+        icon: 'Database',
+        inputs: [],
+        outputs: [{ name: 'tables', type: 'array' }],
+        configFields: [
+          {
+            name: 'db_type',
+            type: 'select',
+            label: 'Database Type',
+            default: 'sqlite',
+            options: [
+              { value: 'sqlite', label: 'SQLite' },
+              { value: 'postgres', label: 'PostgreSQL' },
+            ],
+          },
+          { name: 'connection', type: 'string', label: 'Connection (path or URL)', default: '' },
+        ],
+      },
+    ],
+  },
+  // ── System ──────────────────────────
+  {
+    id: 'system',
+    label: 'System',
+    icon: 'Terminal',
+    color: '#64748b',
+    tools: [
+      {
+        id: 'python-execute',
+        label: 'Python Execute',
+        category: 'system',
+        description: 'Execute Python script and capture output',
+        icon: 'PlayCircle',
+        inputs: [{ name: 'code', type: 'string', required: true }],
+        outputs: [
+          { name: 'stdout', type: 'string' },
+          { name: 'stderr', type: 'string' },
+          { name: 'exit_code', type: 'number' },
+          { name: 'files', type: 'array', description: 'Generated files as base64' },
+        ],
+        configFields: [
+          { name: 'code', type: 'string', label: 'Python Code', default: '' },
+          { name: 'timeout_ms', type: 'number', label: 'Timeout (ms)', default: 30000 },
+          { name: 'capture_files', type: 'string', label: 'Capture Files Pattern', default: '', placeholder: '*.png,*.csv' },
+        ],
+      },
+      {
+        id: 'clipboard-read',
+        label: 'Clipboard Read',
+        category: 'system',
+        description: 'Read text or image from system clipboard',
+        icon: 'Clipboard',
+        inputs: [],
+        outputs: [{ name: 'content', type: 'string' }, { name: 'type', type: 'string' }],
+        configFields: [],
+      },
+      {
+        id: 'clipboard-write',
+        label: 'Clipboard Write',
+        category: 'system',
+        description: 'Write text to system clipboard',
+        icon: 'Clipboard',
+        inputs: [{ name: 'text', type: 'string', required: true }],
+        outputs: [{ name: 'success', type: 'boolean' }],
+        configFields: [
+          { name: 'text', type: 'string', label: 'Text to Copy', default: '' },
+        ],
+      },
+    ],
   },
   // ── Agent System Tools ──────────────────────────
   {

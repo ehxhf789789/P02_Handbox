@@ -59,6 +59,7 @@ pub async fn execute_native(input: &ToolInput) -> Result<ToolOutput, ExecutorErr
         "grep-search" | "code-search" => execute_grep(input).await?,
         "web-search" => execute_web_search(input).await?,
         "web-fetch" | "http-fetch" => execute_web_fetch(input).await?,
+        "http-request" => execute_http_request(input).await?,
         // GIS tools
         "gis-read" | "geojson-read" => execute_gis_read(input)?,
         "gis-write" | "geojson-write" => execute_gis_write(input)?,
@@ -66,6 +67,10 @@ pub async fn execute_native(input: &ToolInput) -> Result<ToolOutput, ExecutorErr
         // IFC tools
         "ifc-read" => execute_ifc_read(input)?,
         "ifc-query" => execute_ifc_query(input)?,
+        // Multi-file read
+        "files-read" => execute_files_read(input)?,
+        // Folder read
+        "folder-read" => execute_folder_read(input)?,
         // Agent task (delegate to agent loop — returns stub here, real exec in hb-tauri)
         "agent-task" => {
             serde_json::json!({
@@ -267,6 +272,85 @@ fn execute_file_write(input: &ToolInput) -> Result<serde_json::Value, ExecutorEr
     Ok(serde_json::json!({ "path": path, "size": content.len() }))
 }
 
+fn execute_files_read(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
+    let file_paths = input
+        .config
+        .get("file_paths")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut contents = Vec::new();
+    for fp in &file_paths {
+        let path = fp.as_str().unwrap_or("");
+        if path.is_empty() { continue; }
+        match std::fs::read_to_string(path) {
+            Ok(content) => {
+                contents.push(serde_json::json!({
+                    "path": path,
+                    "content": content,
+                    "size": content.len(),
+                }));
+            }
+            Err(e) => {
+                contents.push(serde_json::json!({
+                    "path": path,
+                    "error": format!("Failed to read: {e}"),
+                }));
+            }
+        }
+    }
+
+    Ok(serde_json::json!({ "contents": contents, "count": contents.len() }))
+}
+
+fn execute_folder_read(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
+    let folder_path = input
+        .config
+        .get("folder_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or(".");
+
+    let pattern = input
+        .config
+        .get("pattern")
+        .and_then(|v| v.as_str())
+        .unwrap_or("*.*");
+
+    let recursive = input
+        .config
+        .get("recursive")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let glob_pattern = if recursive {
+        format!("{folder_path}/**/{pattern}")
+    } else {
+        format!("{folder_path}/{pattern}")
+    };
+
+    let mut files = Vec::new();
+    for entry in glob::glob(&glob_pattern).map_err(|e| ExecutorError::ExecutionFailed(format!("Invalid glob pattern: {e}")))? {
+        match entry {
+            Ok(path) => {
+                if path.is_file() {
+                    let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                    files.push(serde_json::json!({
+                        "path": path.to_string_lossy(),
+                        "name": path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(),
+                        "size": size,
+                    }));
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Glob entry error: {e}");
+            }
+        }
+    }
+
+    Ok(serde_json::json!({ "files": files, "count": files.len() }))
+}
+
 fn execute_text_split(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
     let text = input
         .inputs
@@ -461,10 +545,55 @@ fn execute_data_filter(input: &ToolInput) -> Result<serde_json::Value, ExecutorE
         .cloned()
         .unwrap_or_default();
 
-    // Phase 2: implement proper JMESPath filter expressions
-    // For now, pass through all items
-    let count = items.len();
-    Ok(serde_json::json!({ "filtered": items, "count": count }))
+    let condition = input
+        .config
+        .get("condition")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    if condition.is_empty() {
+        let count = items.len();
+        return Ok(serde_json::json!({ "filtered": items, "count": count }));
+    }
+
+    // Parse simple conditions: "field op value"
+    let filtered: Vec<serde_json::Value> = items
+        .into_iter()
+        .filter(|item| {
+            let parts: Vec<&str> = condition.splitn(3, ' ').collect();
+            if parts.len() < 3 { return true; }
+            let (field, op, value_str) = (parts[0], parts[1], parts[2]);
+            let field_val = item.get(field);
+            match field_val {
+                Some(fv) => {
+                    if let (Some(fv_num), Ok(val_num)) = (fv.as_f64(), value_str.parse::<f64>()) {
+                        match op {
+                            ">" | "gt" => fv_num > val_num,
+                            "<" | "lt" => fv_num < val_num,
+                            ">=" | "gte" => fv_num >= val_num,
+                            "<=" | "lte" => fv_num <= val_num,
+                            "==" | "eq" => (fv_num - val_num).abs() < f64::EPSILON,
+                            "!=" | "ne" => (fv_num - val_num).abs() >= f64::EPSILON,
+                            _ => true,
+                        }
+                    } else {
+                        let fv_str = fv.as_str().unwrap_or(&fv.to_string()).to_string();
+                        let val_clean = value_str.trim_matches('"').trim_matches('\'');
+                        match op {
+                            "==" | "eq" => fv_str == val_clean,
+                            "!=" | "ne" => fv_str != val_clean,
+                            "contains" => fv_str.contains(val_clean),
+                            _ => true,
+                        }
+                    }
+                }
+                None => false,
+            }
+        })
+        .collect();
+
+    let count = filtered.len();
+    Ok(serde_json::json!({ "filtered": filtered, "count": count }))
 }
 
 fn execute_regex_extract(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
@@ -480,15 +609,25 @@ fn execute_regex_extract(input: &ToolInput) -> Result<serde_json::Value, Executo
         .and_then(|v| v.as_str())
         .unwrap_or(".*");
 
-    // Simple regex matching
-    let matches: Vec<String> = text
-        .lines()
-        .filter(|line| line.contains(pattern))
-        .map(|s| s.to_string())
+    let re = regex::Regex::new(pattern)
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("Invalid regex pattern: {e}")))?;
+
+    let matches: Vec<serde_json::Value> = re
+        .find_iter(text)
+        .map(|m| serde_json::json!({
+            "text": m.as_str(),
+            "start": m.start(),
+            "end": m.end(),
+        }))
+        .collect();
+
+    let groups: Vec<Vec<String>> = re
+        .captures_iter(text)
+        .map(|cap| cap.iter().map(|m| m.map(|m| m.as_str().to_string()).unwrap_or_default()).collect())
         .collect();
 
     let count = matches.len();
-    Ok(serde_json::json!({ "matches": matches, "count": count }))
+    Ok(serde_json::json!({ "matches": matches, "groups": groups, "count": count }))
 }
 
 fn execute_merge(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
@@ -637,7 +776,46 @@ async fn execute_llm_chat(input: &ToolInput) -> Result<serde_json::Value, Execut
         format!("Context:\n{context}\n\nQuestion/Task:\n{prompt}")
     };
 
-    // Try providers in order: Anthropic, OpenAI, Bedrock (IAM), Bedrock (Bearer), Local
+    // If explicit provider is set, use only that provider (no waterfall)
+    if let Some(ref provider) = input.llm_provider {
+        tracing::info!("[LLM Chat] Using explicit provider: {}", provider);
+        match provider.as_str() {
+            "anthropic" => {
+                let api_key = std::env::var("ANTHROPIC_API_KEY")
+                    .map_err(|_| ExecutorError::ExecutionFailed("Anthropic API key not configured. Set credentials in Settings.".into()))?;
+                return call_anthropic_api(&api_key, model, &full_prompt, &system_prompt, max_tokens, temperature).await;
+            }
+            "openai" => {
+                let api_key = std::env::var("OPENAI_API_KEY")
+                    .map_err(|_| ExecutorError::ExecutionFailed("OpenAI API key not configured. Set credentials in Settings.".into()))?;
+                return call_openai_api(&api_key, model, &full_prompt, &system_prompt, max_tokens, temperature).await;
+            }
+            "bedrock" => {
+                if let (Ok(access_key), Ok(secret_key)) = (
+                    std::env::var("AWS_ACCESS_KEY_ID"),
+                    std::env::var("AWS_SECRET_ACCESS_KEY"),
+                ) {
+                    let region = std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string());
+                    return call_bedrock_iam_api(&access_key, &secret_key, &region, model, &full_prompt, &system_prompt, max_tokens, temperature).await;
+                }
+                if let Ok(api_key) = std::env::var("BEDROCK_API_KEY") {
+                    let region = std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string());
+                    return call_bedrock_api(&api_key, &region, model, &full_prompt, &system_prompt, max_tokens, temperature).await;
+                }
+                return Err(ExecutorError::ExecutionFailed("AWS Bedrock credentials not configured. Set credentials in Settings.".into()));
+            }
+            "local" => {
+                let endpoint = std::env::var("LOCAL_LLM_ENDPOINT")
+                    .unwrap_or_else(|_| "http://localhost:11434".to_string());
+                return call_local_llm_api(&endpoint, model, &full_prompt, &system_prompt, max_tokens, temperature).await;
+            }
+            _ => {
+                tracing::warn!("[LLM Chat] Unknown provider '{}', falling through to auto-detect", provider);
+            }
+        }
+    }
+
+    // Fallback: auto-detect from environment variables (backward compat)
     if let Ok(api_key) = std::env::var("ANTHROPIC_API_KEY") {
         return call_anthropic_api(&api_key, model, &full_prompt, &system_prompt, max_tokens, temperature).await;
     }
@@ -647,7 +825,6 @@ async fn execute_llm_chat(input: &ToolInput) -> Result<serde_json::Value, Execut
         return call_openai_api(&api_key, openai_model, &full_prompt, &system_prompt, max_tokens, temperature).await;
     }
 
-    // Try AWS Bedrock with IAM credentials (Signature V4)
     if let (Ok(access_key), Ok(secret_key)) = (
         std::env::var("AWS_ACCESS_KEY_ID"),
         std::env::var("AWS_SECRET_ACCESS_KEY"),
@@ -656,7 +833,6 @@ async fn execute_llm_chat(input: &ToolInput) -> Result<serde_json::Value, Execut
         return call_bedrock_iam_api(&access_key, &secret_key, &region, model, &full_prompt, &system_prompt, max_tokens, temperature).await;
     }
 
-    // Try Bedrock with Bearer token
     if let Ok(api_key) = std::env::var("BEDROCK_API_KEY") {
         let region = std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string());
         return call_bedrock_api(&api_key, &region, model, &full_prompt, &system_prompt, max_tokens, temperature).await;
@@ -736,6 +912,7 @@ async fn execute_llm_summarize(input: &ToolInput) -> Result<serde_json::Value, E
             "max_tokens": input.config.get("max_tokens").cloned().unwrap_or(serde_json::json!(2048)),
             "temperature": 0.3
         }),
+        llm_provider: input.llm_provider.clone(),
     };
 
     let result = execute_llm_chat(&modified_input).await?;
@@ -1122,6 +1299,131 @@ fn strip_html_tags(html: &str) -> String {
         true
     });
     result
+}
+
+// ---- HTTP Request Tool (generic REST API client) ----
+
+async fn execute_http_request(input: &ToolInput) -> Result<serde_json::Value, ExecutorError> {
+    let url = input.config.get("url")
+        .or_else(|| input.inputs.get("url"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    if url.is_empty() {
+        return Err(ExecutorError::ExecutionFailed("http-request: url is required in config".into()));
+    }
+
+    let method = input.config.get("method")
+        .and_then(|v| v.as_str())
+        .unwrap_or("GET")
+        .to_uppercase();
+
+    let timeout_secs = input.config.get("timeout")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(30);
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(timeout_secs))
+        .build()
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("HTTP client error: {e}")))?;
+
+    let mut request = match method.as_str() {
+        "POST" => client.post(url),
+        "PUT" => client.put(url),
+        "DELETE" => client.delete(url),
+        "PATCH" => client.patch(url),
+        "HEAD" => client.head(url),
+        _ => client.get(url),
+    };
+
+    request = request.header("User-Agent", "Handbox/2.0");
+
+    // Apply custom headers from config
+    if let Some(headers) = input.config.get("headers") {
+        if let Some(headers_obj) = headers.as_object() {
+            for (key, value) in headers_obj {
+                if let Some(val_str) = value.as_str() {
+                    request = request.header(key.as_str(), val_str);
+                }
+            }
+        }
+    }
+
+    // Apply query parameters from config
+    if let Some(params) = input.config.get("params") {
+        if let Some(params_obj) = params.as_object() {
+            let pairs: Vec<(String, String)> = params_obj.iter()
+                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                .collect();
+            request = request.query(&pairs);
+        }
+    }
+
+    // Apply body for POST/PUT/PATCH
+    if matches!(method.as_str(), "POST" | "PUT" | "PATCH") {
+        if let Some(body) = input.config.get("body") {
+            if let Some(body_str) = body.as_str() {
+                request = request.body(body_str.to_string());
+                // Auto-set content-type if not already set
+                if input.config.get("headers")
+                    .and_then(|h| h.get("Content-Type"))
+                    .is_none()
+                {
+                    request = request.header("Content-Type", "application/json");
+                }
+            } else {
+                // JSON body
+                request = request.json(body);
+            }
+        }
+    }
+
+    // Apply auth if provided
+    if let Some(auth) = input.config.get("auth") {
+        if let Some(bearer) = auth.get("bearer").and_then(|v| v.as_str()) {
+            request = request.bearer_auth(bearer);
+        } else if let Some(api_key) = auth.get("api_key").and_then(|v| v.as_str()) {
+            let header_name = auth.get("api_key_header").and_then(|v| v.as_str()).unwrap_or("X-API-Key");
+            request = request.header(header_name, api_key);
+        }
+    }
+
+    let resp = request.send().await
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("HTTP request failed: {e}")))?;
+
+    let status = resp.status().as_u16();
+    let resp_headers: serde_json::Value = {
+        let mut map = serde_json::Map::new();
+        for (k, v) in resp.headers().iter() {
+            if let Ok(val) = v.to_str() {
+                map.insert(k.as_str().to_string(), serde_json::json!(val));
+            }
+        }
+        serde_json::Value::Object(map)
+    };
+
+    let body = resp.text().await
+        .map_err(|e| ExecutorError::ExecutionFailed(format!("Failed to read response: {e}")))?;
+
+    // Try to parse as JSON for structured output
+    let parsed_body = serde_json::from_str::<serde_json::Value>(&body)
+        .ok();
+
+    let max_chars = input.config.get("max_chars")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(100_000) as usize;
+    let truncated: String = body.chars().take(max_chars).collect();
+
+    Ok(serde_json::json!({
+        "url": url,
+        "method": method,
+        "status": status,
+        "response": truncated,
+        "response_json": parsed_body,
+        "headers": resp_headers,
+        "length": body.len(),
+        "output": truncated,
+    }))
 }
 
 // ---- GIS Tools for Workflow Nodes ----

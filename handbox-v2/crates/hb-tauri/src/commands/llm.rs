@@ -27,6 +27,12 @@ pub struct LLMRequest {
     pub max_tokens: Option<i32>,
     pub temperature: Option<f32>,
     pub provider: Option<String>,
+    /// Native function calling tool definitions (Anthropic tool_use / OpenAI functions)
+    #[serde(default)]
+    pub tools: Option<Vec<ToolDefinition>>,
+    /// Tool choice: "auto" | "any" | "none"
+    #[serde(default)]
+    pub tool_choice: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,6 +40,28 @@ pub struct LLMResponse {
     pub text: String,
     pub model: String,
     pub usage: TokenUsage,
+    /// Structured tool calls from function calling APIs
+    #[serde(default)]
+    pub tool_calls: Option<Vec<ToolCall>>,
+    /// Stop reason: "end_turn" | "tool_use" | "max_tokens" | "stop"
+    #[serde(default)]
+    pub stop_reason: Option<String>,
+}
+
+/// Native tool definition for function calling APIs
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolDefinition {
+    pub name: String,
+    pub description: String,
+    pub input_schema: serde_json::Value,
+}
+
+/// A structured tool call from function calling response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    pub input: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -277,6 +305,8 @@ async fn call_anthropic(
     max_tokens: i32,
     temperature: f32,
     messages: &Option<Vec<ChatMessage>>,
+    tools: &Option<Vec<ToolDefinition>>,
+    tool_choice: &Option<String>,
 ) -> Result<LLMResponse, String> {
     let msgs = build_messages_json(messages, prompt);
     let mut body = serde_json::json!({
@@ -289,6 +319,29 @@ async fn call_anthropic(
     if let Some(sys) = system_prompt {
         if !sys.is_empty() {
             body["system"] = serde_json::Value::String(sys.to_string());
+        }
+    }
+
+    // Add function calling tools if provided
+    if let Some(ref tool_defs) = tools {
+        if !tool_defs.is_empty() {
+            let tool_json: Vec<serde_json::Value> = tool_defs.iter().map(|t| {
+                serde_json::json!({
+                    "name": t.name,
+                    "description": t.description,
+                    "input_schema": t.input_schema,
+                })
+            }).collect();
+            body["tools"] = serde_json::json!(tool_json);
+
+            if let Some(ref choice) = tool_choice {
+                body["tool_choice"] = match choice.as_str() {
+                    "auto" => serde_json::json!({"type": "auto"}),
+                    "any" => serde_json::json!({"type": "any"}),
+                    "none" => serde_json::json!({"type": "none"}),
+                    _ => serde_json::json!({"type": "auto"}),
+                };
+            }
         }
     }
 
@@ -314,13 +367,30 @@ async fn call_anthropic(
         .await
         .map_err(|e| format!("Response parse failed: {}", e))?;
 
-    let text = result["content"][0]["text"]
-        .as_str()
-        .unwrap_or("")
-        .to_string();
+    // Parse content blocks: may contain text and/or tool_use
+    let mut text = String::new();
+    let mut tool_calls = Vec::new();
+    if let Some(content) = result["content"].as_array() {
+        for block in content {
+            match block["type"].as_str() {
+                Some("text") => {
+                    text.push_str(block["text"].as_str().unwrap_or(""));
+                }
+                Some("tool_use") => {
+                    tool_calls.push(ToolCall {
+                        id: block["id"].as_str().unwrap_or("").to_string(),
+                        name: block["name"].as_str().unwrap_or("").to_string(),
+                        input: block["input"].clone(),
+                    });
+                }
+                _ => {}
+            }
+        }
+    }
 
     let input_tokens = result["usage"]["input_tokens"].as_i64().unwrap_or(0) as i32;
     let output_tokens = result["usage"]["output_tokens"].as_i64().unwrap_or(0) as i32;
+    let stop_reason = result["stop_reason"].as_str().map(|s| s.to_string());
 
     Ok(LLMResponse {
         text,
@@ -329,6 +399,8 @@ async fn call_anthropic(
             input_tokens,
             output_tokens,
         },
+        tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
+        stop_reason,
     })
 }
 
@@ -344,6 +416,8 @@ async fn call_openai(
     max_tokens: i32,
     temperature: f32,
     chat_messages: &Option<Vec<ChatMessage>>,
+    tools: &Option<Vec<ToolDefinition>>,
+    tool_choice: &Option<String>,
 ) -> Result<LLMResponse, String> {
     let mut messages = Vec::new();
 
@@ -360,12 +434,38 @@ async fn call_openai(
     // Append structured conversation messages or single prompt
     messages.extend(build_messages_json(chat_messages, prompt));
 
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
         "model": model,
         "messages": messages,
         "max_tokens": max_tokens,
         "temperature": temperature
     });
+
+    // Add function calling tools if provided
+    if let Some(ref tool_defs) = tools {
+        if !tool_defs.is_empty() {
+            let funcs: Vec<serde_json::Value> = tool_defs.iter().map(|t| {
+                serde_json::json!({
+                    "type": "function",
+                    "function": {
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": t.input_schema,
+                    }
+                })
+            }).collect();
+            body["tools"] = serde_json::json!(funcs);
+
+            if let Some(ref choice) = tool_choice {
+                body["tool_choice"] = match choice.as_str() {
+                    "auto" => serde_json::json!("auto"),
+                    "any" => serde_json::json!("required"),
+                    "none" => serde_json::json!("none"),
+                    _ => serde_json::json!("auto"),
+                };
+            }
+        }
+    }
 
     let client = reqwest::Client::new();
     let response = client
@@ -388,13 +488,36 @@ async fn call_openai(
         .await
         .map_err(|e| format!("Response parse failed: {}", e))?;
 
-    let text = result["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("")
-        .to_string();
+    let message = &result["choices"][0]["message"];
+    let text = message["content"].as_str().unwrap_or("").to_string();
+
+    // Parse OpenAI tool_calls
+    let mut tool_calls = Vec::new();
+    if let Some(tc_array) = message["tool_calls"].as_array() {
+        for tc in tc_array {
+            if tc["type"].as_str() == Some("function") {
+                let func = &tc["function"];
+                let input: serde_json::Value = func["arguments"]
+                    .as_str()
+                    .and_then(|s| serde_json::from_str(s).ok())
+                    .unwrap_or(serde_json::json!({}));
+                tool_calls.push(ToolCall {
+                    id: tc["id"].as_str().unwrap_or("").to_string(),
+                    name: func["name"].as_str().unwrap_or("").to_string(),
+                    input,
+                });
+            }
+        }
+    }
 
     let input_tokens = result["usage"]["prompt_tokens"].as_i64().unwrap_or(0) as i32;
     let output_tokens = result["usage"]["completion_tokens"].as_i64().unwrap_or(0) as i32;
+    let finish_reason = result["choices"][0]["finish_reason"].as_str().map(|s| {
+        match s {
+            "tool_calls" => "tool_use".to_string(),
+            other => other.to_string(),
+        }
+    });
 
     Ok(LLMResponse {
         text,
@@ -403,6 +526,8 @@ async fn call_openai(
             input_tokens,
             output_tokens,
         },
+        tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
+        stop_reason: finish_reason,
     })
 }
 
@@ -479,6 +604,8 @@ async fn call_local_llm(
                 input_tokens: prompt_eval_count,
                 output_tokens: eval_count,
             },
+            tool_calls: None,
+            stop_reason: Some("end_turn".to_string()),
         })
     } else {
         // Fallback: single prompt via /api/generate
@@ -530,6 +657,8 @@ async fn call_local_llm(
                 input_tokens: prompt_eval_count,
                 output_tokens: eval_count,
             },
+            tool_calls: None,
+            stop_reason: Some("end_turn".to_string()),
         })
     }
 }
@@ -622,6 +751,18 @@ pub async fn set_local_llm_endpoint(
     creds.local_endpoint = Some(endpoint);
     creds.save(&state.credentials_path())?;
 
+    Ok(true)
+}
+
+/// Set the active LLM provider (persisted to credentials file)
+#[tauri::command]
+pub async fn set_active_llm_provider(
+    provider: String,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<bool, String> {
+    let mut creds = state.llm_credentials.write().await;
+    creds.active_provider = Some(provider);
+    creds.save(&state.credentials_path())?;
     Ok(true)
 }
 
@@ -737,7 +878,7 @@ pub async fn test_llm_connection(provider: String) -> Result<ConnectionResult, S
                 }
             };
 
-            let result = call_openai(&api_key, "gpt-3.5-turbo", "Hi", None, 10, 0.0, &None).await;
+            let result = call_openai(&api_key, "gpt-3.5-turbo", "Hi", None, 10, 0.0, &None, &None, &None).await;
 
             match result {
                 Ok(_) => Ok(ConnectionResult {
@@ -767,7 +908,7 @@ pub async fn test_llm_connection(provider: String) -> Result<ConnectionResult, S
                 }
             };
 
-            let result = call_anthropic(&api_key, "claude-3-haiku-20240307", "Hi", None, 10, 0.0, &None).await;
+            let result = call_anthropic(&api_key, "claude-3-haiku-20240307", "Hi", None, 10, 0.0, &None, &None, &None).await;
 
             match result {
                 Ok(_) => Ok(ConnectionResult {
@@ -981,6 +1122,28 @@ pub async fn invoke_llm(request: LLMRequest) -> Result<LLMResponse, String> {
                 }
             }
 
+            // Add function calling tools for Bedrock (Anthropic format)
+            if let Some(ref tool_defs) = request.tools {
+                if !tool_defs.is_empty() {
+                    let tool_json: Vec<serde_json::Value> = tool_defs.iter().map(|t| {
+                        serde_json::json!({
+                            "name": t.name,
+                            "description": t.description,
+                            "input_schema": t.input_schema,
+                        })
+                    }).collect();
+                    body["tools"] = serde_json::json!(tool_json);
+                    if let Some(ref choice) = request.tool_choice {
+                        body["tool_choice"] = match choice.as_str() {
+                            "auto" => serde_json::json!({"type": "auto"}),
+                            "any" => serde_json::json!({"type": "any"}),
+                            "none" => serde_json::json!({"type": "none"}),
+                            _ => serde_json::json!({"type": "auto"}),
+                        };
+                    }
+                }
+            }
+
             // Try multiple regions
             let regions = [region.as_str(), "us-east-1", "us-west-2"];
             let mut last_error = String::new();
@@ -988,13 +1151,33 @@ pub async fn invoke_llm(request: LLMRequest) -> Result<LLMResponse, String> {
             for r in regions {
                 match call_bedrock(&access_key, &secret_key, &base_model_id, r, &body).await {
                     Ok(resp) => {
-                        let text = resp["content"][0]["text"].as_str().unwrap_or("").to_string();
+                        // Parse content blocks (may contain text + tool_use)
+                        let mut text = String::new();
+                        let mut tool_calls = Vec::new();
+                        if let Some(content) = resp["content"].as_array() {
+                            for block in content {
+                                match block["type"].as_str() {
+                                    Some("text") => text.push_str(block["text"].as_str().unwrap_or("")),
+                                    Some("tool_use") => {
+                                        tool_calls.push(ToolCall {
+                                            id: block["id"].as_str().unwrap_or("").to_string(),
+                                            name: block["name"].as_str().unwrap_or("").to_string(),
+                                            input: block["input"].clone(),
+                                        });
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
                         let input_tokens = resp["usage"]["input_tokens"].as_i64().unwrap_or(0) as i32;
                         let output_tokens = resp["usage"]["output_tokens"].as_i64().unwrap_or(0) as i32;
+                        let stop_reason = resp["stop_reason"].as_str().map(|s| s.to_string());
                         return Ok(LLMResponse {
                             text,
                             model: base_model_id,
                             usage: TokenUsage { input_tokens, output_tokens },
+                            tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
+                            stop_reason,
                         });
                     }
                     Err(e) => last_error = e,
@@ -1007,43 +1190,32 @@ pub async fn invoke_llm(request: LLMRequest) -> Result<LLMResponse, String> {
             let api_key = std::env::var("OPENAI_API_KEY")
                 .map_err(|_| "No OpenAI API key configured")?;
             call_openai(
-                &api_key,
-                &model_id,
-                &request.prompt,
-                request.system_prompt.as_deref(),
-                max_tokens,
-                temperature,
-                &request.messages,
-            )
-            .await
+                &api_key, &model_id, &request.prompt,
+                request.system_prompt.as_deref(), max_tokens, temperature,
+                &request.messages, &request.tools, &request.tool_choice,
+            ).await
         }
         "anthropic" => {
             let api_key = std::env::var("ANTHROPIC_API_KEY")
                 .map_err(|_| "No Anthropic API key configured")?;
             call_anthropic(
-                &api_key,
-                &model_id,
-                &request.prompt,
-                request.system_prompt.as_deref(),
-                max_tokens,
-                temperature,
-                &request.messages,
-            )
-            .await
+                &api_key, &model_id, &request.prompt,
+                request.system_prompt.as_deref(), max_tokens, temperature,
+                &request.messages, &request.tools, &request.tool_choice,
+            ).await
         }
         "local" => {
             let endpoint = std::env::var("LOCAL_LLM_ENDPOINT")
                 .unwrap_or_else(|_| "http://localhost:11434".to_string());
-            call_local_llm(
-                &endpoint,
-                &model_id,
-                &request.prompt,
-                request.system_prompt.as_deref(),
-                max_tokens,
-                temperature,
+            let mut resp = call_local_llm(
+                &endpoint, &model_id, &request.prompt,
+                request.system_prompt.as_deref(), max_tokens, temperature,
                 &request.messages,
-            )
-            .await
+            ).await?;
+            // Local doesn't support function calling — ensure fields are set
+            resp.tool_calls = None;
+            resp.stop_reason = Some("end_turn".to_string());
+            Ok(resp)
         }
         _ => Err(format!("Unknown provider: {}", provider)),
     }
@@ -1108,7 +1280,7 @@ pub async fn invoke_llm_stream(
                 &api_key, &model_id, &request.prompt,
                 request.system_prompt.as_deref(),
                 max_tokens, temperature, &stream_id, &app,
-                &request.messages,
+                &request.messages, &request.tools, &request.tool_choice,
             ).await
         }
         "bedrock" => {
@@ -1122,7 +1294,7 @@ pub async fn invoke_llm_stream(
                 &access_key, &secret_key, &base_model, &region,
                 &request.prompt, request.system_prompt.as_deref(),
                 max_tokens, temperature, &stream_id, &app,
-                &request.messages,
+                &request.messages, &request.tools, &request.tool_choice,
             ).await
         }
         _ => {
@@ -1143,7 +1315,7 @@ pub async fn invoke_llm_stream(
     }
 }
 
-/// Stream from Anthropic Messages API (SSE)
+/// Stream from Anthropic Messages API (SSE) — supports text + tool_use content blocks
 async fn stream_anthropic(
     api_key: &str,
     model: &str,
@@ -1154,6 +1326,8 @@ async fn stream_anthropic(
     stream_id: &str,
     app: &tauri::AppHandle,
     messages: &Option<Vec<ChatMessage>>,
+    tools: &Option<Vec<ToolDefinition>>,
+    tool_choice: &Option<String>,
 ) -> Result<LLMResponse, String> {
     use tauri::Emitter;
 
@@ -1169,6 +1343,28 @@ async fn stream_anthropic(
     if let Some(sys) = system_prompt {
         if !sys.is_empty() {
             body["system"] = serde_json::Value::String(sys.to_string());
+        }
+    }
+
+    // Add function calling tools
+    if let Some(ref tool_defs) = tools {
+        if !tool_defs.is_empty() {
+            let tool_json: Vec<serde_json::Value> = tool_defs.iter().map(|t| {
+                serde_json::json!({
+                    "name": t.name,
+                    "description": t.description,
+                    "input_schema": t.input_schema,
+                })
+            }).collect();
+            body["tools"] = serde_json::json!(tool_json);
+            if let Some(ref choice) = tool_choice {
+                body["tool_choice"] = match choice.as_str() {
+                    "auto" => serde_json::json!({"type": "auto"}),
+                    "any" => serde_json::json!({"type": "any"}),
+                    "none" => serde_json::json!({"type": "none"}),
+                    _ => serde_json::json!({"type": "auto"}),
+                };
+            }
         }
     }
 
@@ -1192,6 +1388,13 @@ async fn stream_anthropic(
     let mut full_text = String::new();
     let mut input_tokens = 0i32;
     let mut output_tokens = 0i32;
+    let mut tool_calls: Vec<ToolCall> = Vec::new();
+    let mut stop_reason = "end_turn".to_string();
+
+    // State for accumulating tool_use content blocks
+    let mut current_tool_id = String::new();
+    let mut current_tool_name = String::new();
+    let mut current_tool_json = String::new();
 
     // Read SSE stream using chunk() (no extra deps needed)
     let mut buffer = String::new();
@@ -1212,14 +1415,57 @@ async fn stream_anthropic(
                 if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
                     let event_type = event["type"].as_str().unwrap_or("");
                     match event_type {
-                        "content_block_delta" => {
-                            if let Some(text) = event["delta"]["text"].as_str() {
-                                full_text.push_str(text);
+                        "content_block_start" => {
+                            let block = &event["content_block"];
+                            if block["type"].as_str() == Some("tool_use") {
+                                current_tool_id = block["id"].as_str().unwrap_or("").to_string();
+                                current_tool_name = block["name"].as_str().unwrap_or("").to_string();
+                                current_tool_json.clear();
                                 let _ = app.emit("llm-stream", serde_json::json!({
                                     "stream_id": stream_id,
-                                    "type": "text",
-                                    "text": text,
+                                    "type": "tool_start",
+                                    "tool_id": &current_tool_id,
+                                    "tool_name": &current_tool_name,
                                 }));
+                            }
+                        }
+                        "content_block_delta" => {
+                            let delta_type = event["delta"]["type"].as_str().unwrap_or("");
+                            if delta_type == "text_delta" {
+                                if let Some(text) = event["delta"]["text"].as_str() {
+                                    full_text.push_str(text);
+                                    let _ = app.emit("llm-stream", serde_json::json!({
+                                        "stream_id": stream_id,
+                                        "type": "text",
+                                        "text": text,
+                                    }));
+                                }
+                            } else if delta_type == "input_json_delta" {
+                                if let Some(json_frag) = event["delta"]["partial_json"].as_str() {
+                                    current_tool_json.push_str(json_frag);
+                                }
+                            }
+                        }
+                        "content_block_stop" => {
+                            // If we were accumulating a tool_use block, finalize it
+                            if !current_tool_id.is_empty() {
+                                let input_val = serde_json::from_str::<serde_json::Value>(&current_tool_json)
+                                    .unwrap_or(serde_json::json!({}));
+                                tool_calls.push(ToolCall {
+                                    id: current_tool_id.clone(),
+                                    name: current_tool_name.clone(),
+                                    input: input_val.clone(),
+                                });
+                                let _ = app.emit("llm-stream", serde_json::json!({
+                                    "stream_id": stream_id,
+                                    "type": "tool_call",
+                                    "tool_id": &current_tool_id,
+                                    "tool_name": &current_tool_name,
+                                    "input": input_val,
+                                }));
+                                current_tool_id.clear();
+                                current_tool_name.clear();
+                                current_tool_json.clear();
                             }
                         }
                         "message_start" => {
@@ -1235,6 +1481,9 @@ async fn stream_anthropic(
                                     .and_then(|v| v.as_i64())
                                     .unwrap_or(0) as i32;
                             }
+                            if let Some(sr) = event["delta"]["stop_reason"].as_str() {
+                                stop_reason = sr.to_string();
+                            }
                         }
                         _ => {}
                     }
@@ -1247,16 +1496,19 @@ async fn stream_anthropic(
         "stream_id": stream_id,
         "type": "done",
         "usage": { "input_tokens": input_tokens, "output_tokens": output_tokens },
+        "stop_reason": &stop_reason,
     }));
 
     Ok(LLMResponse {
         text: full_text,
         model: model.to_string(),
         usage: TokenUsage { input_tokens, output_tokens },
+        tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
+        stop_reason: Some(stop_reason),
     })
 }
 
-/// Stream from Bedrock (SSE via invoke-with-response-stream)
+/// Stream from Bedrock (SSE via invoke-with-response-stream) — supports text + tool_use
 async fn stream_bedrock(
     access_key: &str,
     secret_key: &str,
@@ -1269,6 +1521,8 @@ async fn stream_bedrock(
     stream_id: &str,
     app: &tauri::AppHandle,
     messages: &Option<Vec<ChatMessage>>,
+    tools: &Option<Vec<ToolDefinition>>,
+    tool_choice: &Option<String>,
 ) -> Result<LLMResponse, String> {
     use tauri::Emitter;
 
@@ -1297,6 +1551,28 @@ async fn stream_bedrock(
     if let Some(sys) = system_prompt {
         if !sys.is_empty() {
             body["system"] = serde_json::Value::String(sys.to_string());
+        }
+    }
+
+    // Add function calling tools (Bedrock uses Anthropic format)
+    if let Some(ref tool_defs) = tools {
+        if !tool_defs.is_empty() {
+            let tool_json: Vec<serde_json::Value> = tool_defs.iter().map(|t| {
+                serde_json::json!({
+                    "name": t.name,
+                    "description": t.description,
+                    "input_schema": t.input_schema,
+                })
+            }).collect();
+            body["tools"] = serde_json::json!(tool_json);
+            if let Some(ref choice) = tool_choice {
+                body["tool_choice"] = match choice.as_str() {
+                    "auto" => serde_json::json!({"type": "auto"}),
+                    "any" => serde_json::json!({"type": "any"}),
+                    "none" => serde_json::json!({"type": "none"}),
+                    _ => serde_json::json!({"type": "auto"}),
+                };
+            }
         }
     }
 
@@ -1345,7 +1621,7 @@ async fn stream_bedrock(
                     "stream_id": stream_id, "type": "done",
                     "usage": { "input_tokens": it, "output_tokens": ot },
                 }));
-                return Ok(LLMResponse { text, model: model_id.to_string(), usage: TokenUsage { input_tokens: it, output_tokens: ot } });
+                return Ok(LLMResponse { text, model: model_id.to_string(), usage: TokenUsage { input_tokens: it, output_tokens: ot }, tool_calls: None, stop_reason: Some("end_turn".to_string()) });
             }
         }
         return Err(format!("Bedrock stream error: {error_body}"));
@@ -1356,6 +1632,13 @@ async fn stream_bedrock(
     let mut full_text = String::new();
     let mut input_tokens = 0i32;
     let mut output_tokens = 0i32;
+    let mut tool_calls: Vec<ToolCall> = Vec::new();
+    let mut stop_reason = "end_turn".to_string();
+
+    // State for accumulating tool_use content blocks
+    let mut current_tool_id = String::new();
+    let mut current_tool_name = String::new();
+    let mut current_tool_json = String::new();
 
     let mut buffer: Vec<u8> = Vec::new();
 
@@ -1396,21 +1679,83 @@ async fn stream_bedrock(
                             &base64::engine::general_purpose::STANDARD, bytes_b64
                         ) {
                             if let Ok(inner) = serde_json::from_slice::<serde_json::Value>(&decoded) {
-                                // content_block_delta → text
-                                if let Some(text) = inner["delta"]["text"].as_str() {
-                                    full_text.push_str(text);
-                                    let _ = app.emit("llm-stream", serde_json::json!({
-                                        "stream_id": stream_id, "type": "text", "text": text,
-                                    }));
+                                let inner_type = inner["type"].as_str().unwrap_or("");
+
+                                match inner_type {
+                                    "content_block_start" => {
+                                        let block = &inner["content_block"];
+                                        if block["type"].as_str() == Some("tool_use") {
+                                            current_tool_id = block["id"].as_str().unwrap_or("").to_string();
+                                            current_tool_name = block["name"].as_str().unwrap_or("").to_string();
+                                            current_tool_json.clear();
+                                            let _ = app.emit("llm-stream", serde_json::json!({
+                                                "stream_id": stream_id,
+                                                "type": "tool_start",
+                                                "tool_id": &current_tool_id,
+                                                "tool_name": &current_tool_name,
+                                            }));
+                                        }
+                                    }
+                                    "content_block_delta" => {
+                                        let delta_type = inner["delta"]["type"].as_str().unwrap_or("");
+                                        if delta_type == "text_delta" {
+                                            if let Some(text) = inner["delta"]["text"].as_str() {
+                                                full_text.push_str(text);
+                                                let _ = app.emit("llm-stream", serde_json::json!({
+                                                    "stream_id": stream_id, "type": "text", "text": text,
+                                                }));
+                                            }
+                                        } else if delta_type == "input_json_delta" {
+                                            if let Some(json_frag) = inner["delta"]["partial_json"].as_str() {
+                                                current_tool_json.push_str(json_frag);
+                                            }
+                                        }
+                                    }
+                                    "content_block_stop" => {
+                                        if !current_tool_id.is_empty() {
+                                            let input_val = serde_json::from_str::<serde_json::Value>(&current_tool_json)
+                                                .unwrap_or(serde_json::json!({}));
+                                            tool_calls.push(ToolCall {
+                                                id: current_tool_id.clone(),
+                                                name: current_tool_name.clone(),
+                                                input: input_val.clone(),
+                                            });
+                                            let _ = app.emit("llm-stream", serde_json::json!({
+                                                "stream_id": stream_id,
+                                                "type": "tool_call",
+                                                "tool_id": &current_tool_id,
+                                                "tool_name": &current_tool_name,
+                                                "input": input_val,
+                                            }));
+                                            current_tool_id.clear();
+                                            current_tool_name.clear();
+                                            current_tool_json.clear();
+                                        }
+                                    }
+                                    "message_start" => {
+                                        if let Some(it) = inner["message"]["usage"]["input_tokens"].as_i64() {
+                                            input_tokens = it as i32;
+                                        }
+                                    }
+                                    "message_delta" => {
+                                        if let Some(ot) = inner["usage"]["output_tokens"].as_i64() {
+                                            output_tokens = ot as i32;
+                                        }
+                                        if let Some(sr) = inner["delta"]["stop_reason"].as_str() {
+                                            stop_reason = sr.to_string();
+                                        }
+                                    }
+                                    _ => {
+                                        // Legacy parsing: direct delta text (older Bedrock format)
+                                        if let Some(text) = inner["delta"]["text"].as_str() {
+                                            full_text.push_str(text);
+                                            let _ = app.emit("llm-stream", serde_json::json!({
+                                                "stream_id": stream_id, "type": "text", "text": text,
+                                            }));
+                                        }
+                                    }
                                 }
-                                // message_start → input_tokens
-                                if let Some(it) = inner["message"]["usage"]["input_tokens"].as_i64() {
-                                    input_tokens = it as i32;
-                                }
-                                // message_delta → output_tokens
-                                if let Some(ot) = inner["usage"]["output_tokens"].as_i64() {
-                                    output_tokens = ot as i32;
-                                }
+
                                 // message_stop → invocation metrics
                                 if let Some(metrics) = inner["amazon-bedrock-invocationMetrics"].as_object() {
                                     input_tokens = metrics.get("inputTokenCount")
@@ -1436,8 +1781,8 @@ async fn stream_bedrock(
         }
     }
 
-    // If streaming produced no text, fall back to non-streaming call
-    if full_text.is_empty() {
+    // If streaming produced no text and no tool calls, fall back to non-streaming call
+    if full_text.is_empty() && tool_calls.is_empty() {
         tracing::warn!("Bedrock streaming produced no text, falling back to non-streaming");
         let fallback_msgs = build_messages_json(messages, prompt);
         let body_val = serde_json::json!({
@@ -1461,7 +1806,7 @@ async fn stream_bedrock(
                         "stream_id": stream_id, "type": "done",
                         "usage": { "input_tokens": it, "output_tokens": ot },
                     }));
-                    return Ok(LLMResponse { text, model: model_id.to_string(), usage: TokenUsage { input_tokens: it, output_tokens: ot } });
+                    return Ok(LLMResponse { text, model: model_id.to_string(), usage: TokenUsage { input_tokens: it, output_tokens: ot }, tool_calls: None, stop_reason: Some("end_turn".to_string()) });
                 }
             }
         }
@@ -1472,11 +1817,14 @@ async fn stream_bedrock(
         "stream_id": stream_id,
         "type": "done",
         "usage": { "input_tokens": input_tokens, "output_tokens": output_tokens },
+        "stop_reason": &stop_reason,
     }));
 
     Ok(LLMResponse {
         text: full_text,
         model: model_id.to_string(),
         usage: TokenUsage { input_tokens, output_tokens },
+        tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
+        stop_reason: Some(stop_reason),
     })
 }

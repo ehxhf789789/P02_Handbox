@@ -17,6 +17,14 @@ export default defineConfig({
   build: {
     target: 'esnext',
     outDir: 'dist',
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'preview-heavy': ['marked', 'pdfjs-dist'],
+          'table': ['@tanstack/react-table', '@tanstack/react-virtual'],
+        },
+      },
+    },
   },
   clearScreen: false,
 })
